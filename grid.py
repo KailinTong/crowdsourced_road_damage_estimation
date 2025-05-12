@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 
 class OccupancyGrid:
-    def __init__(self, net_file, resolution=1.0, prior=0.1, margin=5.0):
+    def __init__(self, net_file, resolution=1.0, prior=0.1, margin=5.0, oversample_margin=20):
         self.resolution = resolution
         self.default_lane_width = 3.2
 
@@ -13,6 +13,7 @@ class OccupancyGrid:
         self.x_min, self.x_max, self.y_min, self.y_max = self._compute_bounds(net_file, margin)
         self.width = int(np.ceil((self.x_max - self.x_min) / resolution))
         self.height = int(np.ceil((self.y_max - self.y_min) / resolution))
+        self.oversample_margin = oversample_margin
 
         self.log_odds = np.full((self.height, self.width), np.nan)
         self._parse_and_draw_lanes(net_file, p_z=prior)
@@ -38,6 +39,31 @@ class OccupancyGrid:
         y_max = max(ys) + margin
         return x_min, x_max, y_min, y_max
 
+    def visualize_lane_centerline(self, net_file):
+        tree = ET.parse(net_file)
+        root = tree.getroot()
+
+        for edge in root.findall("edge"):
+            if edge.attrib.get("function") == "internal":
+                continue
+            for lane in edge.findall("lane"):
+                shape_str = lane.attrib["shape"]
+                shape_pts = [tuple(map(float, pt.split(","))) for pt in shape_str.strip().split()]
+                xs, ys = zip(*[(x, y) for x, y, *_ in shape_pts])
+                plt.plot(xs, ys, linestyle='-', linewidth=0.5, label=f"Lane {lane.attrib['id']}")
+
+        plt.xlabel("X (meters)")
+        plt.ylabel("Y (meters)")
+        plt.title("Lane Centerlines")
+        plt.legend()
+        plt.grid()
+        plt.tight_layout()
+        plt.savefig("lane_centerlines.png", dpi=300, bbox_inches='tight')
+        plt.show()
+        plt.close()
+
+
+
     def _parse_and_draw_lanes(self, net_file, p_z=0.9):
         tree = ET.parse(net_file)
         root = tree.getroot()
@@ -60,23 +86,49 @@ class OccupancyGrid:
         if seg_len == 0:
             return
 
+        # -- geometric setup --
+        # unit normal
         nx, ny = -dy / seg_len, dx / seg_len
         half_w = width / 2.0
-        steps_across = int(half_w / self.resolution)
-        steps_along = int(seg_len / self.resolution)
 
+        # how many grid cells across the half‐width (rounded up)
+        half_w_cells = int(np.ceil(half_w / self.resolution))
+
+        # convert probability to log-odds once
         l_z = self._prob_to_logodds(p_z)
-        # Draw the lane segment
-        for t in np.linspace(0, 1, steps_along + 1):
+
+        # -- along-segment sampling setup --
+        base_steps = int(np.ceil(seg_len / self.resolution))  # #steps to cover the length
+        overlap_steps = self.oversample_margin  # how many extra “steps” of overlap
+        # ensure at least one sample beyond each end
+        n_along = max(base_steps + overlap_steps, overlap_steps + 1)
+
+        # step size (in t-units) between samples if covering [0,1] in n_along points
+        dt = 1.0 / (n_along - 1)
+        eps = overlap_steps * dt
+
+        # sample from t = -eps … 1+eps so that adjacent segments overlap by overlap_steps
+        ts = np.linspace(-eps, 1 + eps, n_along)
+
+        # -- paint each cross-section slice --
+        for t in ts:
             cx = x0 + t * dx
             cy = y0 + t * dy
-            for s in np.linspace(-steps_across, steps_across, 2 * steps_across + 1):
-                px = cx + s * self.resolution * nx
-                py = cy + s * self.resolution * ny
-                idx = self.world_to_grid(px, py)
-                if idx:
-                    if np.isnan(self.log_odds[idx[0], idx[1]]):
-                        self.log_odds[idx[0], idx[1]] = l_z
+
+            center_idx = self.world_to_grid(cx, cy)
+            if center_idx is None:
+                continue
+            i0, j0 = center_idx
+
+            # fill all cells within half_w_cells of the slice center
+            for di in range(-half_w_cells, half_w_cells + 1):
+                for dj in range(-half_w_cells, half_w_cells + 1):
+                    i, j = i0 + di, j0 + dj
+                    if not (0 <= i < self.height and 0 <= j < self.width):
+                        continue
+                    if np.isnan(self.log_odds[i, j]):
+                        self.log_odds[i, j] = l_z
+
 
     def world_to_grid(self, x, y):
         i = int((y - self.y_min) / self.resolution)
@@ -108,12 +160,18 @@ class OccupancyGrid:
 
 
 if __name__ == "__main__":
+
+
+
     # Create grid (bounds auto-computed)
     grid = OccupancyGrid(
         net_file="scenario/A2_GO2GW_v2_MM.net.xml",
         resolution=1.0,
         prior=0.1
     )
+
+    # visualize lane centerlines
+    grid.visualize_lane_centerline("scenario/A2_GO2GW_v2_MM.net.xml")
 
     # Get occupancy probability map
     prob_map = grid.get_probability_map()
