@@ -28,7 +28,7 @@ P_FALSE = 0.05  # probability of false alarm
 GPS_SIGMA = 5.0  # GPS noise in meters
 DECAY_RATE = 0.2  # decay rate for the occupancy grid
 SMOOTHING_SIGMA = 1.0 # sigma for the gaussian smoothing
-SIM_STEPS = 3600 # number of simulation steps
+SIM_STEPS = 7200 # number of simulation steps
 
 
 # -------------------
@@ -81,7 +81,7 @@ def analyze():
     grid = OccupancyGrid(NET_FILE, RESOLUTION, PRIOR, MARGIN, OVERLAP_STEPS, DECAY_RATE, SMOOTHING_SIGMA)
     X_MIN, X_MAX, Y_MIN, Y_MAX = grid.x_min, grid.x_max, grid.y_min, grid.y_max
 
-    grid.batch_update("detection_logs.txt", VehicleSensor(P_TRUE, P_FALSE, GPS_SIGMA, None), batch_size=BATCH_SIZE)
+    grid.batch_update(detection_file_name, VehicleSensor(P_TRUE, P_FALSE, GPS_SIGMA, None), batch_size=BATCH_SIZE)
     probmap = grid.get_probability_map()
     # why is probmap empty
     # show the maximum probability of the probmap which is not nan

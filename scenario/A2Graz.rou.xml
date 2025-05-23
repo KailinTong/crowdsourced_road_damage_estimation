@@ -19,7 +19,7 @@
 	
 	
 
-	<flow begin="0" end="3600" id="CVs" route="01" type="CV" vehsPerHour="5040" departLane="best" departPos="last" departSpeed="max" />
+	<flow begin="0" end="7200" id="CVs" route="01" type="CV" vehsPerHour="5040" departLane="best" departPos="last" departSpeed="max" />
 	
 
 
