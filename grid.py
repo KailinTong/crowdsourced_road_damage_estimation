@@ -1,24 +1,29 @@
 import numpy as np
 import xml.etree.ElementTree as ET
 import matplotlib.pyplot as plt
+from scipy.ndimage import gaussian_filter
 
 
 
 class OccupancyGrid:
-    def __init__(self, net_file, resolution=1.0, prior=0.1, margin=5.0, oversample_margin=20):
+    def __init__(self, net_file, resolution=1.0, prior=0.1, margin=5.0, overlap_steps=20, decay_rate=0.1, smoothing_sigma=1.0):
+        self.decay_rate = decay_rate
+        self.smoothing_sigma = smoothing_sigma
         self.resolution = resolution
         self.default_lane_width = 3.2
+        self.prior = prior
 
         # Compute map bounds based on lane shape coordinates
         self.x_min, self.x_max, self.y_min, self.y_max = self._compute_bounds(net_file, margin)
         self.width = int(np.ceil((self.x_max - self.x_min) / resolution))
         self.height = int(np.ceil((self.y_max - self.y_min) / resolution))
-        self.oversample_margin = oversample_margin
+        self.overlap_steps = overlap_steps
 
         self.log_odds = np.full((self.height, self.width), np.nan)
         self._parse_and_draw_lanes(net_file, p_z=prior)
 
     def _compute_bounds(self, net_file, margin):
+
         tree = ET.parse(net_file)
         root = tree.getroot()
         xs, ys = [], []
@@ -99,7 +104,7 @@ class OccupancyGrid:
 
         # -- along-segment sampling setup --
         base_steps = int(np.ceil(seg_len / self.resolution))  # #steps to cover the length
-        overlap_steps = self.oversample_margin  # how many extra “steps” of overlap
+        overlap_steps = self.overlap_steps  # how many extra “steps” of overlap
         # ensure at least one sample beyond each end
         n_along = max(base_steps + overlap_steps, overlap_steps + 1)
 
@@ -137,11 +142,83 @@ class OccupancyGrid:
             return i, j
         return None
 
-    def update_cell(self, i, j, p_z):
-        l_z = self._prob_to_logodds(p_z)
+    def update_cell(self, i, j, p_true, p_false, detected):
+        """
+        Update the log-odds of cell (i,j) based on a new binary measurement.
+
+        :param i:         grid‐row index
+        :param j:         grid‐col index
+        :param p_true:    P(z=1 | D)  (true positive rate)
+        :param p_false:   P(z=1 | ¬D) (false alarm rate)
+        :param detected:  bool, True if we observed z=1, False if z=0
+        """
+
+        # check if cell is valid
         if np.isnan(self.log_odds[i, j]):
-            self.log_odds[i, j] = 0
-        self.log_odds[i, j] += l_z
+            return
+
+        # choose the correct likelihoods for this measurement
+        if detected:
+            p_z = p_true  # P(z=1 | D)
+            p_nz = p_false  # P(z=1 | ¬D)
+        else:
+            p_z = 1.0 - p_true  # P(z=0 | D)
+            p_nz = 1.0 - p_false  # P(z=0 | ¬D)
+
+        # increment in log-odds form:
+        #   l_sensor = log [ P(z|D) / P(z|¬D) ]
+        l_sensor = np.log(p_z / p_nz)
+
+
+
+        # Bayes update in log-odds domain
+        self.log_odds[i, j] += l_sensor
+
+    def _apply_hits(self, hits: np.ndarray, sensor) -> None:
+        """
+        Apply one batch of hits to self.log_odds, including decay & smoothing.
+        """
+        # sensor log-odds increment per hit
+        L_hit = np.log(sensor.p_true / sensor.p_false)
+
+        valid = ~np.isnan(self.log_odds)
+        # 1) add hits
+        self.log_odds[valid] += hits[valid] * L_hit
+        # 2) decay toward prior
+        a = self.decay_rate
+        self.log_odds[valid] = (1 - a) * self.log_odds[valid] + a * np.log(self.prior)
+        # 3) smooth
+        self.log_odds[valid] = gaussian_filter(
+            self.log_odds[valid],
+            sigma=self.smoothing_sigma
+        )
+
+    def batch_update(self, log_path: str, sensor, batch_size: int = 360):
+        """
+        Read detections from `log_path` in batches of `batch_size` lines,
+        accumulate hits per grid‐cell, then apply updates incrementally.
+        """
+        # prepare a hits‐array for one batch
+        batch_hits = np.zeros_like(self.log_odds, dtype=int)
+
+        with open(log_path, 'r') as f:
+            for i, line in enumerate(f, start=1):
+                _, xs, ys, det = line.split()
+                if det != 'True':
+                    continue
+
+                cell = self.world_to_grid(float(xs), float(ys))
+                if cell:
+                    batch_hits[cell] += 1
+
+                # every batch_size lines, or at end, apply & reset
+                if i % batch_size == 0:
+                    self._apply_hits(batch_hits, sensor)
+                    batch_hits.fill(0)
+
+        # leftover hits after the final full batch
+        if np.any(batch_hits):
+            self._apply_hits(batch_hits, sensor)
 
     def get_probability_map(self):
         prob_map = np.full_like(self.log_odds, np.nan)
