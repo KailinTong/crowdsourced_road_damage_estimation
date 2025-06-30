@@ -129,7 +129,7 @@ def analyze():
     plt.figure(figsize=(8, 8))
     plt.imshow(probmap_sliced, origin='lower', extent=(damage_x_min, damage_x_max, damage_y_min, damage_y_max))
     plt.colorbar(label='P(occupied)')
-    plt.title('Road Damage Occupancy Grid Map (Sliced)')
+    plt.title('Road Anomaly Occupancy Grid Map (Sliced)')
     plt.xlabel('X [m]')
     plt.ylabel('Y [m]')
     plt.savefig('image/occupancy_grid_sliced_'+str(SIM_STEPS)+'.png', dpi=300, bbox_inches='tight')
