@@ -10,9 +10,9 @@ from fusion import FusionEngine
 from road_damage import RoadDamage
 
 # --- USER CONFIG ---
-NET_FILE = 'scenario/A2_GO2GW_v2_MM.net.xml'
-ROUTE_FILE = 'scenario/A2Graz.rou.xml'
-ADDITIONAL_FILE = 'scenario/road_damage.add.xml'
+NET_FILE = 'scenario/Graz_A2/A2_GO2GW_v2_MM.net.xml'
+ROUTE_FILE = 'scenario/Graz_A2/A2Graz.rou.xml'
+ADDITIONAL_FILE = 'scenario/Graz_A2/road_damage.add.xml'
 SUMO_CMD = ['sumo', '-n', NET_FILE, '-r', ROUTE_FILE, '-a', ADDITIONAL_FILE, '--step-length', '1.0']
 DAMAGE_EDGE_IDS = ['-4001.0.00', '-4002.0.00', '-5004.0.00']
 # DAMAGE_EDGE_IDS = ['-4001.0.00', '-4002.0.00']

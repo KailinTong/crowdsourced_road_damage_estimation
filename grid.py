@@ -242,7 +242,7 @@ if __name__ == "__main__":
 
     # Create grid (bounds auto-computed)
     grid = OccupancyGrid(
-        net_file="scenario/A2_GO2GW_v2_MM.net.xml",
+        net_file="scenario/Graz_A2/A2_GO2GW_v2_MM.net.xml",
         resolution=1.0,
         prior=0.1
     )

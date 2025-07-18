@@ -30,8 +30,8 @@ SIGMA         = 0.3    # m (lateral deviation std. dev.)
 d_left  = -TRACK_WIDTH / 2.0
 d_right =  TRACK_WIDTH / 2.0
 
-NET_FILE = "scenario/pothole_Brussel_rural/osm_withProjParam.net.xml"
-Polygon_File = "scenario/pothole_Brussel_rural/potholes.add.xml"
+NET_FILE = "scenario/Brussel_rural/osm_withProjParam.net.xml"
+Polygon_File = "scenario/Brussel_rural/potholes.add.xml"
 
 # color to severity mapping
 # < !-- High - severity(H) → red, thick, top layer -->
