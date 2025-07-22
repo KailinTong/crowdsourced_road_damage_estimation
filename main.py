@@ -35,8 +35,8 @@ SIM_STEPS = 7200 # number of simulation steps
 
 def simulate():
     damage_model = RoadDamage(NET_FILE, DAMAGE_EDGE_IDS, radius=3.0, damage_file=ADDITIONAL_FILE)
-    # save the dagmage model to a file
-    damage_model.save('data/damage_model.txt')
+    # save the dagmage model according to the scenario name
+    damage_model.save('data/' + NET_FILE.split('/')[-1].replace('.net.xml', '_damage_model.txt'))
 
     print(f"Loaded damage model: {damage_model}")
     for dmg in damage_model.all_damages():

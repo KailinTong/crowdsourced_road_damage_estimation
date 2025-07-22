@@ -30,8 +30,9 @@ SIGMA         = 0.3    # m (lateral deviation std. dev.)
 d_left  = -TRACK_WIDTH / 2.0
 d_right =  TRACK_WIDTH / 2.0
 
-NET_FILE = "scenario/Brussel_rural/osm_withProjParam.net.xml"
-Polygon_File = "scenario/Brussel_rural/potholes.add.xml"
+SCENARIO_NAME = "Brussel_rural"
+NET_FILE = "scenario/brussel_rural/osm_withProjParam.net.xml"
+Polygon_File = "scenario/brussel_rural/potholes.add.xml"
 
 # color to severity mapping
 # < !-- High - severity(H) → red, thick, top layer -->
@@ -123,7 +124,7 @@ for p in potholes:
         "severity": p["severtiy"],  # severity is according to the color
     }
     #  save this dict to a json file
-    with open('data/pothole_Brussel_rural/potholes_with_probabilities.json', 'w') as f:
+with open(f"data/{SCENARIO_NAME}_anomaly_probabilities.json", 'w') as f:
         json.dump(results, f, indent=4)
 #
 
