@@ -2,18 +2,33 @@
 import matplotlib.pyplot as plt
 import sumolib
 import numpy as np
-
+import json
 from grid import OccupancyGrid
 from sensor import VehicleSensor, Detection
 from sumo_interface import SumoInterface
 from fusion import FusionEngine
 from road_damage import RoadDamage
+from typing import Dict, List
 
 # --- USER CONFIG ---
-NET_FILE = 'scenario/Graz_A2/A2_GO2GW_v2_MM.net.xml'
-ROUTE_FILE = 'scenario/Graz_A2/A2Graz.rou.xml'
-ADDITIONAL_FILE = 'scenario/Graz_A2/road_damage.add.xml'
-SUMO_CMD = ['sumo', '-n', NET_FILE, '-r', ROUTE_FILE, '-a', ADDITIONAL_FILE, '--step-length', '1.0']
+# NET_FILE = 'scenario/Graz_A2/A2_GO2GW_v2_MM.net.xml'
+# ROUTE_FILE = 'scenario/Graz_A2/A2Graz.rou.xml'
+# ADDITIONAL_FILE = 'scenario/Graz_A2/road_damage.add.xml'
+# PROBABILITY_FILE = 'scenario/Graz_A2/road_anomaly_probabilities.json'
+
+SCENARIO_NAME = 'brussel_rural'
+NET_FILE = 'scenario/brussel_rural/osm_withProjParam.net.xml'
+SUMOCFG_FILE = 'scenario/brussel_rural/osm.sumocfg'
+ROUTE_FILE = 'scenario/brussel_rural/osm.rou.xml'
+ADDITIONAL_FILE = 'scenario/brussel_rural/potholes.add.xml'
+PROBABILITY_FILE = 'data/brussel_rural/road_anomaly_probabilities.json'
+ROAD_ANOMALY_DETECTION_FILE = 'data/road_anomaly_metrics.json'
+
+
+# SUMO_CMD = ['sumo', '-n', NET_FILE, '-r', ROUTE_FILE, '-a', ADDITIONAL_FILE, '--step-length', '1.0']
+SUMO_CMD = ['sumo-gui', '-c', SUMOCFG_FILE ,'--step-length', '1.0']
+# SUMO_CMD = ['sumo', '-c', SUMOCFG_FILE, '--step-length', '1.0']
+
 DAMAGE_EDGE_IDS = ['-4001.0.00', '-4002.0.00', '-5004.0.00']
 # DAMAGE_EDGE_IDS = ['-4001.0.00', '-4002.0.00']
 
@@ -27,40 +42,74 @@ P_TRUE = 0.90  # probability of detection
 P_FALSE = 0.05  # probability of false alarm
 GPS_SIGMA = 5.0  # GPS noise in meters
 DECAY_RATE = 0.2  # decay rate for the occupancy grid
-SMOOTHING_SIGMA = 1.0 # sigma for the gaussian smoothing
-SIM_STEPS = 7200 # number of simulation steps
+SMOOTHING_SIGMA = 1.0  # sigma for the gaussian smoothing
+SIM_STEPS = 7200  # number of simulation steps
+
+
+# laod the probability dictionary from the json file
+def load_road_anomaly_metrics(path: str = "data/road_anomaly_metrics.json") -> Dict[str, Dict[str, float]]:
+    """
+    Load road anomaly metrics from a JSON file into a Python dict.
+
+    Parameters:
+        path (str): Path to the JSON file containing the metrics.
+
+    Returns:
+        Dict[str, Dict[str, float]]:
+            A dict where each key is an anomaly type (plus severity suffix if any),
+            and each value is a dict with keys "tp", "fn", "fp" mapping to floats.
+    """
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Metrics file not found: {path}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Error parsing JSON metrics file: {e}")
+
+    return data
+
+
+PROB_DICT = load_road_anomaly_metrics(ROAD_ANOMALY_DETECTION_FILE)
 
 
 # -------------------
 
 def simulate():
-    damage_model = RoadDamage(NET_FILE, DAMAGE_EDGE_IDS, radius=3.0, damage_file=ADDITIONAL_FILE)
-    # save the dagmage model according to the scenario name
-    damage_model.save('data/' + NET_FILE.split('/')[-1].replace('.net.xml', '_damage_model.txt'))
+    damage_model = RoadDamage(NET_FILE, DAMAGE_EDGE_IDS, radius=3.0, damage_file=ADDITIONAL_FILE, probability_file=PROBABILITY_FILE)
+    # save the damage model according to the scenario name
+    damage_model.save('data/' + SCENARIO_NAME + '/damage_model.json')
 
     print(f"Loaded damage model: {damage_model}")
     for dmg in damage_model.all_damages():
         print(" ", dmg)
 
     grid = OccupancyGrid(NET_FILE, RESOLUTION, PRIOR)
-    sensor_model = VehicleSensor(P_TRUE, P_FALSE, GPS_SIGMA, None, damage_model)
+    sensor_model = VehicleSensor(PROB_DICT, GPS_SIGMA, None, damage_model)
     fusion_eng = FusionEngine(grid, sensor_model)
     sumo = SumoInterface(SUMO_CMD)
 
     detections = []
+    veh_pos_last = {}
     for step in range(SIM_STEPS):
         sumo.step()
         damage_detected = False
         for vid, (x, y) in sumo.get_vehicle_positions().items():
             if sumo.get_vehicle_type(vid) != 'PasVeh':
                 continue
-            detection = sensor_model.detect_damage_position(step, x, y)
+            if vid not in veh_pos_last:
+                detection = sensor_model.detect_damage_position(step, x, y)
+            else:
+                # Use the last true position of the vehicle
+                last_x, last_y = veh_pos_last[vid]
+                detection = sensor_model.detect_damage_travel_position(step, last_x, last_y, x, y)
             if detection.detected:
                 print(f"[step {step}] Vehicle {vid} detected damage at ({detection.x:.2f}, {detection.y:.2f})")
                 detections.append(detection)
                 damage_detected = True
+            veh_pos_last[vid] = (x, y)  # Store the last true position of the vehicle
         if not damage_detected:
-            detections.append(Detection(0, 0, step, False))
+            detections.append(Detection(0, 0, step, False, "na"))
 
     detection_file_name = 'data/detection_logs_' + str(SIM_STEPS) + '.txt'
     with open(detection_file_name, 'w') as f:
@@ -95,7 +144,7 @@ def analyze():
     plt.title('Road Damage Occupancy Grid Map (Final)')
     plt.xlabel('X [m]')
     plt.ylabel('Y [m]')
-    plt.savefig('image/occupancy_grid_'+str(SIM_STEPS)+'.png', dpi=300, bbox_inches='tight')
+    plt.savefig('image/occupancy_grid_' + str(SIM_STEPS) + '.png', dpi=300, bbox_inches='tight')
     plt.show()
     plt.close()
 
@@ -132,7 +181,7 @@ def analyze():
     plt.title('Road Anomaly Occupancy Grid Map (Sliced)')
     plt.xlabel('X [m]')
     plt.ylabel('Y [m]')
-    plt.savefig('image/occupancy_grid_sliced_'+str(SIM_STEPS)+'.png', dpi=300, bbox_inches='tight')
+    plt.savefig('image/occupancy_grid_sliced_' + str(SIM_STEPS) + '.png', dpi=300, bbox_inches='tight')
     plt.show()
     plt.close()
 
@@ -151,10 +200,10 @@ def analyze():
     plt.title('Vehicle Damage Detections (Binned)')
     plt.xlabel('X [m]')
     plt.ylabel('Y [m]')
-    plt.savefig('image/detection_density_'+str(SIM_STEPS)+'.png', dpi=300, bbox_inches='tight')
+    plt.savefig('image/detection_density_' + str(SIM_STEPS) + '.png', dpi=300, bbox_inches='tight')
     plt.show()
 
 
 if __name__ == "__main__":
-    # simulate()
-    analyze()
+    simulate()
+    # analyze()

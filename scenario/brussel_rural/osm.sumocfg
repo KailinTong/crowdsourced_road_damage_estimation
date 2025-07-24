@@ -7,12 +7,12 @@
 
     <input>
         <net-file value="osm_withProjParam.net.xml"/>
-        <route-files value="osm.passenger.trips.xml"/>
+        <route-files value="osm.rou.xml"/>
         <additional-files value="osm.poly.xml.gz,output.add.xml, potholes.add.xml"/>
     </input>
 
     <output>
-        <tripinfo-output value="tripinfos.xml"/>
+        <!-- tripinfo-output value="tripinfos.xml"/-->
         <statistic-output value="stats.xml"/>
     </output>
 
