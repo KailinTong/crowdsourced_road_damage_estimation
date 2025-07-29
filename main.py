@@ -26,8 +26,8 @@ ROAD_ANOMALY_DETECTION_FILE = 'data/road_anomaly_metrics.json'
 
 
 # SUMO_CMD = ['sumo', '-n', NET_FILE, '-r', ROUTE_FILE, '-a', ADDITIONAL_FILE, '--step-length', '1.0']
-SUMO_CMD = ['sumo-gui', '-c', SUMOCFG_FILE ,'--step-length', '1.0']
-# SUMO_CMD = ['sumo', '-c', SUMOCFG_FILE, '--step-length', '1.0']
+# SUMO_CMD = ['sumo-gui', '-c', SUMOCFG_FILE ,'--step-length', '1.0']
+SUMO_CMD = ['sumo', '-c', SUMOCFG_FILE, '--step-length', '1.0']
 
 DAMAGE_EDGE_IDS = ['-4001.0.00', '-4002.0.00', '-5004.0.00']
 # DAMAGE_EDGE_IDS = ['-4001.0.00', '-4002.0.00']
@@ -43,7 +43,7 @@ P_FALSE = 0.05  # probability of false alarm
 GPS_SIGMA = 5.0  # GPS noise in meters
 DECAY_RATE = 0.2  # decay rate for the occupancy grid
 SMOOTHING_SIGMA = 1.0  # sigma for the gaussian smoothing
-SIM_STEPS = 7200  # number of simulation steps
+SIM_STEPS = 1000  # number of simulation steps
 
 
 # laod the probability dictionary from the json file
@@ -98,23 +98,25 @@ def simulate():
             if sumo.get_vehicle_type(vid) != 'PasVeh':
                 continue
             if vid not in veh_pos_last:
-                detection = sensor_model.detect_damage_position(step, x, y)
+                veh_pos_last[vid] = (x, y)
             else:
                 # Use the last true position of the vehicle
                 last_x, last_y = veh_pos_last[vid]
+                veh_pos_last[vid] = (x, y)  # Update the last position
                 detection = sensor_model.detect_damage_travel_position(step, last_x, last_y, x, y)
-            if detection.detected:
-                print(f"[step {step}] Vehicle {vid} detected damage at ({detection.x:.2f}, {detection.y:.2f})")
-                detections.append(detection)
-                damage_detected = True
+                if detection.detected:
+                    print(f"[step {step}] Vehicle {vid} detected damage at ({detection.x:.2f}, {detection.y:.2f}) with "
+                      f"type '{detection.type}'")
+                    detections.append(detection)
+                    damage_detected = True
             veh_pos_last[vid] = (x, y)  # Store the last true position of the vehicle
         if not damage_detected:
             detections.append(Detection(0, 0, step, False, "na"))
 
-    detection_file_name = 'data/detection_logs_' + str(SIM_STEPS) + '.txt'
+    detection_file_name = 'data/' + SCENARIO_NAME + '/detection_logs_' + str(SIM_STEPS) + '.txt'
     with open(detection_file_name, 'w') as f:
         for d in detections:
-            f.write(f"{d.step} {d.x} {d.y} {d.detected}\n")
+            f.write(f"{d.step} {d.x} {d.y} {d.detected} {d.type}\n")
 
     sumo.close()
 

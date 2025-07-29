@@ -1,6 +1,7 @@
 import logging
 
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon, LineString
+
 import xml.etree.ElementTree as ET
 import sumolib
 import json
@@ -10,7 +11,7 @@ class Damage:
     Can be initialized with a circular area or an arbitrary polygon.
     """
     def __init__(self, id: str = None, x: float = None, y: float = None,
-                 radius: float = 1.0, shape: Polygon = None, probability: float = 1.0, severity: str = "l"):
+                 radius: float = 1.0, shape: Polygon = None, probability: float = 1.0, severity: str = "l", road_anomaly_type: str = "unknown"):
         self.id = id
         if shape is not None:
             # Use provided polygon shape
@@ -23,6 +24,7 @@ class Damage:
             self.shape = self.location.buffer(radius)
         self.probability = probability
         self.severity = severity
+        self.type = road_anomaly_type
 
     def contains(self, x: float, y: float) -> bool:
         """
@@ -34,10 +36,21 @@ class Damage:
         bounds = self.shape.bounds
         diameter = max(bounds[2] - bounds[0], bounds[3] - bounds[1])
         return (f"<Damage id={self.id!r} loc=({self.location.x:.2f},{self.location.y:.2f}) diameter={diameter:.2f} "
-                f" prob={self.probability}  severity={self.severity}>")
+                f" prob={self.probability}  severity={self.severity}  type={self.type}>")
 
-    def intersects_travel_path(self, last_x, last_y, x, y):
-        pass
+    def intersects_travel_path(self, last_x, last_y, x, y, lane_width=3.6) -> bool:
+        """
+        Check if the travel path from (last_x, last_y) to (x, y) intersects with this damage's shape.
+        """
+        # generate a symmetric rectangle around the travel path, the width of the rectangle is lane_width
+        line = LineString([(last_x, last_y), (x, y)])
+        # Create a buffer around the line to simulate the lane width
+        travel_path_buffer = line.buffer(lane_width / 2)
+        # Check if the damage shape intersects with the travel path buffer
+        return self.shape.intersects(travel_path_buffer)
+
+
+
 
 
 class RoadDamage:
@@ -87,8 +100,9 @@ class RoadDamage:
             # give a warning if no severity is found
             if severity is None:
                 logging.WARNING(f'No severity found for polygon ID {pid} in {probability_file}. ')
-
-            damages.append(Damage(id=pid, shape=polygon, probability=probability, severity=severity))
+            road_anomaly_type = pid.split('_')[0] if '_' in pid else 'unknown' + '_' + severity
+            road_anomaly_type = road_anomaly_type + '_' + severity
+            damages.append(Damage(id=pid, shape=polygon, probability=probability, severity=severity, road_anomaly_type=road_anomaly_type))
         return damages
 
     def _generate_damage_points(self) -> list[Damage]:
@@ -139,14 +153,18 @@ class RoadDamage:
                 data.append({
                     'id': damage.id,
                     'centroid': (damage.shape.centroid.x, damage.shape.centroid.y),
-                    'probability': damage.probability
+                    'probability': damage.probability,
+                    'severity': damage.severity,
+                    'road_anomaly_type': damage.type
                 })
             else:
                 # Save point coordinates
                 data.append({
                     'id': damage.id,
                     'point': (damage.location.x, damage.location.y),
-                    'probability': damage.probability
+                    'probability': damage.probability,
+                    'severity': damage.severity,
+                    'road_anomaly_type': damage.type
                 })
         with open(filename, 'w') as f:
             json.dump(data, f, indent=4)

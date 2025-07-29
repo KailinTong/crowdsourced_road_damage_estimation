@@ -5,7 +5,9 @@
             76.39340349581528,
             41.32888909799353
         ],
-        "probability": 0.395
+        "probability": 0.395,
+        "severity": "h",
+        "road_anomaly_type": "pothole_h"
     },
     {
         "id": "pothole_1",
@@ -13,7 +15,9 @@
             73.76654346592619,
             77.4155857464912
         ],
-        "probability": 0.38
+        "probability": 0.38,
+        "severity": "h",
+        "road_anomaly_type": "pothole_h"
     },
     {
         "id": "pothole_2",
@@ -21,7 +25,9 @@
             71.1192133644651,
             91.93558149123164
         ],
-        "probability": 0.066
+        "probability": 0.066,
+        "severity": "l",
+        "road_anomaly_type": "pothole_l"
     },
     {
         "id": "pothole_3",
@@ -29,7 +35,9 @@
             61.43887265775423,
             133.99662016105754
         ],
-        "probability": 0.244
+        "probability": 0.244,
+        "severity": "m",
+        "road_anomaly_type": "pothole_m"
     },
     {
         "id": "pothole_4",
@@ -37,7 +45,9 @@
             63.602276506975485,
             163.9633757234095
         ],
-        "probability": 0.518
+        "probability": 0.518,
+        "severity": "m",
+        "road_anomaly_type": "pothole_m"
     },
     {
         "id": "pothole_6",
@@ -45,7 +55,9 @@
             70.13999845275941,
             201.61599706559147
         ],
-        "probability": 0.178
+        "probability": 0.178,
+        "severity": "m",
+        "road_anomaly_type": "pothole_m"
     },
     {
         "id": "pothole_5",
@@ -53,6 +65,8 @@
             71.29735714723307,
             200.06012496654247
         ],
-        "probability": 0.024
+        "probability": 0.024,
+        "severity": "m",
+        "road_anomaly_type": "pothole_m"
     }
 ]

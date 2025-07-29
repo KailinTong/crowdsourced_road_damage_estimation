@@ -4,15 +4,15 @@
     xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
 
     <!-- vehicle type definition -->
-    <vType id="veh_passenger" vClass="passenger"/>
+    <vType id="PasVeh" vClass="passenger"/>
 
     <!-- flows connecting right-top road and bottom road, two directions -->
-    <flow id="rt_to_bottom" type="veh_passenger"
+    <flow id="rt_to_bottom" type="PasVeh"
           begin="0.00"    end="7200"
           vehsPerHour="3600"
           departLane="best" departSpeed="max"
           from="62324046" to="-33288234#0"/>
-    <flow id="bottom_to_rt" type="veh_passenger"
+    <flow id="bottom_to_rt" type="PasVeh"
           begin="0.00"    end="7200"
           vehsPerHour="3600"
           departLane="best" departSpeed="max"

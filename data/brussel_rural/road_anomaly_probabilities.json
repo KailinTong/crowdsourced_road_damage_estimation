@@ -7,7 +7,7 @@
             "right": 0.394,
             "vehicle": 0.395
         },
-        "severity": "H"
+        "severity": "h"
     },
     "pothole_1": {
         "id": "pothole_1",
@@ -17,7 +17,7 @@
             "right": 0.377,
             "vehicle": 0.38
         },
-        "severity": "H"
+        "severity": "h"
     },
     "pothole_2": {
         "id": "pothole_2",
@@ -27,7 +27,7 @@
             "right": 0.029,
             "vehicle": 0.066
         },
-        "severity": "L"
+        "severity": "l"
     },
     "pothole_3": {
         "id": "pothole_3",
@@ -37,7 +37,7 @@
             "right": 0.244,
             "vehicle": 0.244
         },
-        "severity": "M"
+        "severity": "m"
     },
     "pothole_4": {
         "id": "pothole_4",
@@ -47,7 +47,7 @@
             "right": 0.518,
             "vehicle": 0.518
         },
-        "severity": "M"
+        "severity": "m"
     },
     "pothole_6": {
         "id": "pothole_6",
@@ -57,7 +57,7 @@
             "right": 0.178,
             "vehicle": 0.178
         },
-        "severity": "M"
+        "severity": "m"
     },
     "pothole_5": {
         "id": "pothole_5",
@@ -67,6 +67,6 @@
             "right": 0.024,
             "vehicle": 0.024
         },
-        "severity": "M"
+        "severity": "m"
     }
 }

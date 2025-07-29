@@ -3,7 +3,7 @@ from shapely.geometry import Point
 from road_damage import RoadDamage
 
 class Detection:
-    def __init__(self, x: float, y: float, step: int, detected: bool, type: dict):
+    def __init__(self, x: float, y: float, step: int, detected: bool, type: str):
         self.x = x
         self.y = y
         self.detected = detected
@@ -36,14 +36,27 @@ class VehicleSensor:
         :param actual_occupied:
         :return:
         """
+        # when actual occupancy is True, it means the road anomaly is present and must be in the key of prob_dict
+
         if actual_occupied:
             # possibility of true positive
-            p_true = self.prob_dict[road_anomaly_type]
-            return np.random.rand() < p_true
+            p_true = self.prob_dict[road_anomaly_type]['tp']
+            if np.random.rand() < p_true:
+                return True, road_anomaly_type
+            else:
+                # if the true positive fails, it is a false negative
+                return False, "na"
         else:
+            # randomly select one road anomaly type from the probability dictionary
+            road_anomaly_type = np.random.choice(list(self.prob_dict.keys()))
             # possibility of false positive
-            p_false = self.prob_dict[road_anomaly_type]
-            return np.random.rand() < p_false
+            p_false = self.prob_dict[road_anomaly_type]['fp']
+            if np.random.rand() < p_false:
+                return True, road_anomaly_type
+            else:
+                # if the false positive fails, it is a true negative
+                return False, "na"
+
 
     def detect_damage_position(self, step: int, x: float, y: float):
         """
@@ -55,32 +68,45 @@ class VehicleSensor:
 
         if self.damage_model is None:
             # no damage model provided
-            return Detection(x_est, y_est, step, self.detect_result(False, "na") )
+            return Detection(x_est, y_est, step, self.detect_result(False, "na"))
         # check each damage shape
         for damage in self.damage_model.all_damages():
             if damage.contains(x, y):
                 # sample GPS noise
-                return Detection(x_est, y_est, step, self.detect_result(True), damage.type)
+                return Detection(x_est, y_est, step, self.detect_result(True, damage.type))
 
         # no damage detected but the sensor still returns a position
-        return Detection(x_est, y_est, step, self.detect_result(False), "na")
+        return Detection(x_est, y_est, step, self.detect_result(False, "na"))
 
-    def detect_damage_travel_position(self, step: int, last_x: float, last_y: float, x: float, y: float):
+    def detect_damage_travel_position(self, step: int, last_x: float, last_y: float, x: float, y: float) -> Detection:
         """
         Returns the Damage instance if the travel path from (last_x, last_y) to (x,y)
         intersects with any damage shape, otherwise None.
         """
         x_est, y_est = self.sample_gps(x, y)
 
-        if self.damage_model is None:
-            # no damage model provided
-            return Detection(x_est, y_est, step, self.detect_result(False))
 
-        # check each damage shape
+
+        # check each damage shape if it detects the travel path
         for damage in self.damage_model.all_damages():
+            # the travel path intersects with the damage width, so it might hit the damage
             if damage.intersects_travel_path(last_x, last_y, x, y):
-                # sample GPS noise
-                return Detection(x_est, y_est, step, self.detect_result(True), damage.type)
+                hit_probability = damage.probability
+                if np.random.rand() < hit_probability:
+                    # if the damage is hit, return detection
+
+                    return Detection(x_est, y_est, step, *self.detect_result(True, damage.type))
+
+
+
+
+        # if the damage is not hit, check the possibility of a false positive
+        for damage in self.damage_model.all_damages():
+            fp = self.prob_dict[damage.type]['fp']
+            if np.random.rand() < fp:
+                # if the damage is not hit, but a false positive is detected
+                return Detection(x_est, y_est, step, *self.detect_result(True, damage.type))
+
 
         # no damage detected but the sensor still returns a position
-        return Detection(x_est, y_est, step, self.detect_result(False, "na"))
+        return Detection(x_est, y_est, step, *self.detect_result(False, "na"))
