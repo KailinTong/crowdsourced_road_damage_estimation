@@ -85,7 +85,7 @@ class VehicleSensor:
         Returns the Damage instance if the travel path from (last_x, last_y) to (x,y)
         intersects with any damage shape, otherwise None.
         """
-        x_est, y_est = self.sample_gps(x, y)
+        x_est, y_est = self.sample_gps(x, y)  # TODO new feature... generate the car with lateral movement distribution?
 
 
 

@@ -9,6 +9,7 @@ from sumo_interface import SumoInterface
 from fusion import FusionEngine
 from road_damage import RoadDamage
 from typing import Dict, List
+from utilities import load_road_anomaly_metrics
 
 # --- USER CONFIG ---
 # NET_FILE = 'scenario/Graz_A2/A2_GO2GW_v2_MM.net.xml'
@@ -26,8 +27,8 @@ ROAD_ANOMALY_DETECTION_FILE = 'data/road_anomaly_metrics.json'
 
 
 # SUMO_CMD = ['sumo', '-n', NET_FILE, '-r', ROUTE_FILE, '-a', ADDITIONAL_FILE, '--step-length', '1.0']
-# SUMO_CMD = ['sumo-gui', '-c', SUMOCFG_FILE ,'--step-length', '1.0']
-SUMO_CMD = ['sumo', '-c', SUMOCFG_FILE, '--step-length', '1.0']
+SUMO_CMD = ['sumo-gui', '-c', SUMOCFG_FILE ,'--step-length', '1.0']
+# SUMO_CMD = ['sumo', '-c', SUMOCFG_FILE, '--step-length', '1.0']
 
 DAMAGE_EDGE_IDS = ['-4001.0.00', '-4002.0.00', '-5004.0.00']
 # DAMAGE_EDGE_IDS = ['-4001.0.00', '-4002.0.00']
@@ -46,28 +47,7 @@ SMOOTHING_SIGMA = 1.0  # sigma for the gaussian smoothing
 SIM_STEPS = 1000  # number of simulation steps
 
 
-# laod the probability dictionary from the json file
-def load_road_anomaly_metrics(path: str = "data/road_anomaly_metrics.json") -> Dict[str, Dict[str, float]]:
-    """
-    Load road anomaly metrics from a JSON file into a Python dict.
 
-    Parameters:
-        path (str): Path to the JSON file containing the metrics.
-
-    Returns:
-        Dict[str, Dict[str, float]]:
-            A dict where each key is an anomaly type (plus severity suffix if any),
-            and each value is a dict with keys "tp", "fn", "fp" mapping to floats.
-    """
-    try:
-        with open(path, "r") as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Metrics file not found: {path}")
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Error parsing JSON metrics file: {e}")
-
-    return data
 
 
 PROB_DICT = load_road_anomaly_metrics(ROAD_ANOMALY_DETECTION_FILE)
@@ -86,7 +66,7 @@ def simulate():
 
     grid = OccupancyGrid(NET_FILE, RESOLUTION, PRIOR)
     sensor_model = VehicleSensor(PROB_DICT, GPS_SIGMA, None, damage_model)
-    fusion_eng = FusionEngine(grid, sensor_model)
+    # fusion_eng = FusionEngine(grid, sensor_model)
     sumo = SumoInterface(SUMO_CMD)
 
     detections = []
@@ -121,19 +101,18 @@ def simulate():
     sumo.close()
 
 
-def analyze():
-    detection_file_name = 'data/detection_logs_' + str(SIM_STEPS) + '.txt'
+def analyze(detection_file_name):
     with open(detection_file_name, 'r') as f:
         detections = []
         for line in f:
-            step, x, y, detected = line.strip().split()
-            detections.append(Detection(float(x), float(y), int(step), detected == 'True'))
+            step, x, y, detected, road_anomaly_type  = line.strip().split()
+            detections.append(Detection(float(x), float(y), int(step), detected == 'True', road_anomaly_type))
 
     grid = OccupancyGrid(NET_FILE, RESOLUTION, PRIOR, MARGIN, OVERLAP_STEPS, DECAY_RATE, SMOOTHING_SIGMA)
     X_MIN, X_MAX, Y_MIN, Y_MAX = grid.x_min, grid.x_max, grid.y_min, grid.y_max
 
-    grid.batch_update(detection_file_name, VehicleSensor(P_TRUE, P_FALSE, GPS_SIGMA, None), batch_size=BATCH_SIZE)
-    probmap = grid.get_probability_map()
+    grid.batch_update(detection_file_name, VehicleSensor(PROB_DICT, GPS_SIGMA, None), batch_size=BATCH_SIZE, prob_dict=PROB_DICT)
+    probmap = grid.gen_probability_map()
     # why is probmap empty
     # show the maximum probability of the probmap which is not nan
     probmap = np.nan_to_num(probmap, nan=0.0)
@@ -207,5 +186,6 @@ def analyze():
 
 
 if __name__ == "__main__":
-    simulate()
-    # analyze()
+    # simulate()
+    analyze( detection_file_name = 'data/' + SCENARIO_NAME + '/detection_logs_' + str(SIM_STEPS) + '.txt')
+
