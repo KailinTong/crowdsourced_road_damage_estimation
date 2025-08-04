@@ -161,61 +161,7 @@ class OccupancyGrid:
             return i, j
         return None
 
-    # def update_cell(self, i, j, p_true, p_false, detected):
-    #     """
-    #     Update the log-odds of cell (i,j) based on a new binary measurement.
-    #
-    #     :param i:         grid‐row index
-    #     :param j:         grid‐col index
-    #     :param p_true:    P(z=1 | D)  (true positive rate)
-    #     :param p_false:   P(z=1 | ¬D) (false alarm rate)
-    #     :param detected:  bool, True if we observed z=1, False if z=0
-    #     """
-    #
-    #     # check if cell is valid
-    #     if np.isnan(self.log_odds[i, j]):
-    #         return
-    #
-    #     # choose the correct likelihoods for this measurement
-    #     if detected:
-    #         p_z = p_true  # P(z=1 | D)
-    #         p_nz = p_false  # P(z=1 | ¬D)
-    #     else:
-    #         p_z = 1.0 - p_true  # P(z=0 | D)
-    #         p_nz = 1.0 - p_false  # P(z=0 | ¬D)
-    #
-    #     # increment in log-odds form:
-    #     #   l_sensor = log [ P(z|D) / P(z|¬D) ]
-    #     l_sensor = np.log(p_z / p_nz)
-    #
-    #
-    #
-    #     # Bayes update in log-odds domain
-    #     self.log_odds[i, j] += l_sensor
-    #
-    # def _apply_hits(self, hits: np.ndarray, sensor) -> None:
-    #     """
-    #     Apply one batch of hits to self.log_odds, including decay & smoothing.
-    #     """
-    #     # sensor log-odds increment per hit
-    #
-    #     # Extend this to support sensor model with prob_dict for different road anomaly types
-    #     # prob_dict is a dictionary with keys as road anomaly types and values as dictionaries with 'tp' , 'tn' and 'fü' probabilities
-    #     L_hit = np.log(sensor.p_true / sensor.p_false)
-    #
-    #     valid = ~np.isnan(self.log_odds)
-    #     # 1) add hits
-    #     self.log_odds[valid] += hits[valid] * L_hit
-    #     # 2) decay toward prior
-    #     a = self.decay_rate
-    #     self.log_odds[valid] = (1 - a) * self.log_odds[valid] + a * np.log(self.prior)
-    #     # 3) smooth
-    #     self.log_odds[valid] = gaussian_filter(
-    #         self.log_odds[valid],
-    #         sigma=self.smoothing_sigma
-    #     )
 
-    # TODO think about where to use the prob_dict, it has been repeated ...
 
     def _apply_hits_k_road_anomaly(self, hits_dict: dict) -> None:
         """
@@ -319,19 +265,21 @@ class OccupancyGrid:
             avg_prob_map (np.ndarray or None): map with region-averaged probability (if average_neighbors)
         """
 
-        if not self.road_anomaly_types:
+        if not self.sensor.anomaly_types:
             raise RuntimeError("No road anomaly types in OccupancyGrid.")
 
         # Step 1: Find per-cell max probability and type
-        max_prob_map = np.full_like(self.log_odds_dict[self.road_anomaly_types[0]], np.nan)
+        max_prob_map = np.full_like(self.log_odds_dict[self.sensor.anomaly_types[0]], 0)
         max_prob_map_type = np.full(max_prob_map.shape, '', dtype='U32')  # Unicode for type names
 
-        for anomaly_type in self.road_anomaly_types:
+        for anomaly_type in self.sensor.anomaly_types:
             prob_map = self._logodds_to_prob(self.log_odds_dict[anomaly_type])
+            # find where the probability map is valid (not NaN)
             mask = ~np.isnan(prob_map)
 
-            # Where this anomaly has higher probability, update max_prob_map and type
-            update_mask = mask & ((np.isnan(max_prob_map)) | (prob_map > max_prob_map))
+            # compare the region with the current max probability map, where the current probability map is greater than the max probability map
+            update_mask = mask &  (prob_map > max_prob_map)
+            # update_mask = mask & ((np.isnan(max_prob_map)) | (prob_map > max_prob_map))
             max_prob_map[update_mask] = prob_map[update_mask]
             max_prob_map_type[update_mask] = anomaly_type
 
@@ -343,8 +291,8 @@ class OccupancyGrid:
 
         # Step 3: Connected component labeling per anomaly type
         region_id_map = np.zeros_like(max_prob_map, dtype=np.int32)
-        next_region_id = 1 # TODO verify and understand this logic, it is used to assign unique IDs to connected regions
-        for anomaly_type in self.road_anomaly_types:
+        next_region_id = 1
+        for anomaly_type in self.sensor.anomaly_types:
             mask = (max_prob_map_type == anomaly_type)
             # Label connected regions (4-connectivity)
             labeled, num_features = label(mask)

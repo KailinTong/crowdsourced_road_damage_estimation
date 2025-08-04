@@ -3,12 +3,13 @@ from shapely.geometry import Point
 from road_damage import RoadDamage
 
 class Detection:
-    def __init__(self, x: float, y: float, step: int, detected: bool, type: str):
+    def __init__(self, x: float, y: float, step: int, detected: bool, type: str, eval: str = "na"):
         self.x = x
         self.y = y
         self.detected = detected
         self.step = step  # step number when the detection was made
         self.type = type
+        self.eval = eval # Evaluation result, tp, fn, fp, tn, or na
 
     def __repr__(self):
         return f"<Detection ({self.x:.2f}, {self.y:.2f}) detected={self.detected}>"
@@ -44,20 +45,20 @@ class VehicleSensor:
             # possibility of true positive
             p_true = self.prob_dict[road_anomaly_type]['tp']
             if np.random.rand() < p_true:
-                return True, road_anomaly_type
+                return True, road_anomaly_type, 'tp'
             else:
                 # if the true positive fails, it is a false negative
-                return False, "na"
+                return False, "na", 'fn'
         else:
             # randomly select one road anomaly type from the probability dictionary
             # possibility of false positive (false alarm) of driving on a mild road
             p_false = self.prob_dict['mild_road']['fp']
             if np.random.rand() < p_false:
                 road_anomaly_type = np.random.choice(self.anomaly_types) # assume each of the K road anomaly types has the same chance of being detected
-                return True, road_anomaly_type
+                return True, road_anomaly_type, 'fp'
             else:
                 # if the false positive fails, it is a true negative
-                return False, "na"
+                return False, "na", 'tn'
 
 
     def detect_damage_position(self, step: int, x: float, y: float):
@@ -70,15 +71,28 @@ class VehicleSensor:
 
         if self.damage_model is None:
             # no damage model provided
-            return Detection(x_est, y_est, step, self.detect_result(False, "na"))
+            detected = self.detect_result(False, "na")
+            if detected[0]: # if the damage is detected, it is a false positive
+                return Detection(x_est, y_est, step, detected[0], detected[1], detected[2])
+            else: # if the damage is not detected, it is a true negative
+                return Detection(x_est, y_est, step, detected[0], detected[1], detected[2])
+
         # check each damage shape
         for damage in self.damage_model.all_damages():
             if damage.contains(x, y):
                 # sample GPS noise
-                return Detection(x_est, y_est, step, self.detect_result(True, damage.type))
+                detected = self.detect_result(True, damage.type)
+                if detected[0]:  # if the damage is detected
+                    return Detection(x_est, y_est, step, detected[0], detected[1], detected[2])
+                else:  # if the damage is not detected, it is a false negative
+                    return Detection(x_est, y_est, step, detected[0], detected[1], detected[2])
 
         # no damage detected but the sensor still returns a position
-        return Detection(x_est, y_est, step, self.detect_result(False, "na"))
+        detected = self.detect_result(False, "na")
+        if detected[0]:  # if the damage is detected, it is a false positive
+            return Detection(x_est, y_est, step, detected[0], detected[1], detected[2])
+        else:  # if the damage is not detected, it is a true negative
+            return Detection(x_est, y_est, step, detected[0], detected[1], detected[2])
 
     def detect_damage_travel_position(self, step: int, last_x: float, last_y: float, x: float, y: float) -> Detection:
         """
@@ -87,7 +101,9 @@ class VehicleSensor:
         """
         x_est, y_est = self.sample_gps(x, y)  # TODO new feature... generate the car with lateral movement distribution?
 
-
+        # TODO doulbe check the logic of generating detections
+        # TODO save tp and fp in the detection object
+        # TODO is the reporting of position okay? it is not exactly the position of the damage, but the position of the vehicle when it detects the damage
 
         # check each damage shape if it detects the travel path
         for damage in self.damage_model.all_damages():
@@ -96,18 +112,22 @@ class VehicleSensor:
                 hit_probability = damage.probability
                 if np.random.rand() < hit_probability:
                     # if the damage is hit, return detection
-
-                    return Detection(x_est, y_est, step, *self.detect_result(True, damage.type))
-
+                    detected = self.detect_result(True, damage.type)
+                    return Detection(x_est, y_est, step, detected[0], detected[1], detected[2])
 
 
 
         # if the damage is not hit, check the possibility of a false positive
-        for damage in self.damage_model.all_damages():
-            fp = self.prob_dict[damage.type]['fp']
-            if np.random.rand() < fp:
-                # if the damage is not hit, but a false positive is detected
-                return Detection(x_est, y_est, step, *self.detect_result(True, damage.type))
+        # for damage in self.damage_model.all_damages():
+        #     fp = self.prob_dict[damage.type]['fp']
+        #     if np.random.rand() < fp:
+        #         # if the damage is not hit, but a false positive is detected
+        #         detected = self.detect_result(True, damage.type)
+        #         return Detection(x_est, y_est, step, detected[0], detected[1], detected[2])
+
+        detected = self.detect_result(False, "na")
+        return Detection(x_est, y_est, step, detected[0], detected[1], detected[2])
+
 
 
         # no damage detected but the sensor still returns a position
