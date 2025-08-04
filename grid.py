@@ -218,7 +218,7 @@ class OccupancyGrid:
 
         with open(log_path, 'r') as f:
             for i, line in enumerate(f, start=1):
-                _, xs, ys, det, road_anomaly_type = line.split()
+                _, xs, ys, det, road_anomaly_type, evaluaiton = line.split()
                 if det != 'True':
                     continue
 

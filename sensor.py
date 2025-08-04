@@ -118,17 +118,9 @@ class VehicleSensor:
 
 
         # if the damage is not hit, check the possibility of a false positive
-        # for damage in self.damage_model.all_damages():
-        #     fp = self.prob_dict[damage.type]['fp']
-        #     if np.random.rand() < fp:
-        #         # if the damage is not hit, but a false positive is detected
-        #         detected = self.detect_result(True, damage.type)
-        #         return Detection(x_est, y_est, step, detected[0], detected[1], detected[2])
 
         detected = self.detect_result(False, "na")
         return Detection(x_est, y_est, step, detected[0], detected[1], detected[2])
 
 
 
-        # no damage detected but the sensor still returns a position
-        return Detection(x_est, y_est, step, *self.detect_result(False, "na"))

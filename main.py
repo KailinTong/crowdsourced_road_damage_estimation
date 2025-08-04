@@ -89,7 +89,7 @@ def simulate():
                 detection = sensor_model.detect_damage_travel_position(step, last_x, last_y, x, y)
                 if detection.detected:
                     print(f"[step {step}] Vehicle {vid} detected damage at ({detection.x:.2f}, {detection.y:.2f}) with "
-                      f"type '{detection.type}'")
+                      f"type '{detection.type}' evaluated as {detection.eval}")
                     detections.append(detection)
                     damage_detected = True
             veh_pos_last[vid] = (x, y)  # Store the last true position of the vehicle
@@ -99,7 +99,7 @@ def simulate():
     detection_file_name = 'data/' + SCENARIO_NAME + '/detection_logs_' + str(SIM_STEPS) + '.txt'
     with open(detection_file_name, 'w') as f:
         for d in detections:
-            f.write(f"{d.step} {d.x} {d.y} {d.detected} {d.type}\n")
+            f.write(f"{d.step} {d.x} {d.y} {d.detected} {d.type} {d.eval}\n")
 
     sumo.close()
 
@@ -108,8 +108,8 @@ def analyze(detection_file_name):
     with open(detection_file_name, 'r') as f:
         detections = []
         for line in f:
-            step, x, y, detected, road_anomaly_type  = line.strip().split()
-            detections.append(Detection(float(x), float(y), int(step), detected == 'True', road_anomaly_type))
+            step, x, y, detected, road_anomaly_type, evaluation  = line.strip().split()
+            detections.append(Detection(float(x), float(y), int(step), detected == 'True', road_anomaly_type, evaluation))
 
     sensor = VehicleSensor(PROB_DICT, GPS_SIGMA, None)
     grid = OccupancyGrid(NET_FILE, sensor, RESOLUTION, PRIOR, MARGIN, OVERLAP_STEPS, DECAY_RATE, SMOOTHING_SIGMA)
@@ -225,6 +225,6 @@ def analyze(detection_file_name):
 
 
 if __name__ == "__main__":
-    simulate()
+    # simulate()
     analyze( detection_file_name = 'data/' + SCENARIO_NAME + '/detection_logs_' + str(SIM_STEPS) + '.txt')
 
