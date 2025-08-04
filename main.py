@@ -9,7 +9,8 @@ from sumo_interface import SumoInterface
 from fusion import FusionEngine
 from road_damage import RoadDamage
 from typing import Dict, List
-from utilities import load_road_anomaly_metrics
+from utilities import load_road_anomaly_metrics, gen_damage_area
+import traci
 
 # --- USER CONFIG ---
 # NET_FILE = 'scenario/Graz_A2/A2_GO2GW_v2_MM.net.xml'
@@ -45,6 +46,7 @@ GPS_SIGMA = 5.0  # GPS noise in meters
 DECAY_RATE = 0.2  # decay rate for the occupancy grid
 SMOOTHING_SIGMA = 1.0  # sigma for the gaussian smoothing
 SIM_STEPS = 1000  # number of simulation steps
+SPEED_THRESHOLD = 3.0  # speed threshold for detecting damage This also used in i
 
 
 
@@ -64,7 +66,7 @@ def simulate():
     for dmg in damage_model.all_damages():
         print(" ", dmg)
 
-    grid = OccupancyGrid(NET_FILE, RESOLUTION, PRIOR)
+    # grid = OccupancyGrid(NET_FILE, RESOLUTION, PRIOR)
     sensor_model = VehicleSensor(PROB_DICT, GPS_SIGMA, None, damage_model)
     # fusion_eng = FusionEngine(grid, sensor_model)
     sumo = SumoInterface(SUMO_CMD)
@@ -76,6 +78,9 @@ def simulate():
         damage_detected = False
         for vid, (x, y) in sumo.get_vehicle_positions().items():
             if sumo.get_vehicle_type(vid) != 'PasVeh':
+                continue
+            # filter the vehilcles wiht low speed
+            if traci.vehicle.getSpeed(vid) < SPEED_THRESHOLD:
                 continue
             if vid not in veh_pos_last:
                 veh_pos_last[vid] = (x, y)
@@ -108,63 +113,53 @@ def analyze(detection_file_name):
             step, x, y, detected, road_anomaly_type  = line.strip().split()
             detections.append(Detection(float(x), float(y), int(step), detected == 'True', road_anomaly_type))
 
-    grid = OccupancyGrid(NET_FILE, RESOLUTION, PRIOR, MARGIN, OVERLAP_STEPS, DECAY_RATE, SMOOTHING_SIGMA)
+    sensor = VehicleSensor(PROB_DICT, GPS_SIGMA, None)
+    grid = OccupancyGrid(NET_FILE, sensor, RESOLUTION, PRIOR, MARGIN, OVERLAP_STEPS, DECAY_RATE, SMOOTHING_SIGMA)
     X_MIN, X_MAX, Y_MIN, Y_MAX = grid.x_min, grid.x_max, grid.y_min, grid.y_max
 
-    grid.batch_update(detection_file_name, VehicleSensor(PROB_DICT, GPS_SIGMA, None), batch_size=BATCH_SIZE, prob_dict=PROB_DICT)
-    probmap = grid.gen_probability_map()
-    # why is probmap empty
-    # show the maximum probability of the probmap which is not nan
-    probmap = np.nan_to_num(probmap, nan=0.0)
-    print("Max probability in probmap:", np.max(probmap))
+    grid.batch_update(detection_file_name,  batch_size=BATCH_SIZE)
+    probmap_dict = grid.gen_probability_map()
 
-    # plot the probmap
-    plt.figure(figsize=(8, 8))
-    plt.imshow(probmap, origin='lower', extent=(grid.x_min, grid.x_max, grid.y_min, grid.y_max))
-    plt.colorbar(label='P(occupied)')
-    plt.title('Road Damage Occupancy Grid Map (Final)')
-    plt.xlabel('X [m]')
-    plt.ylabel('Y [m]')
-    plt.savefig('image/occupancy_grid_' + str(SIM_STEPS) + '.png', dpi=300, bbox_inches='tight')
-    plt.show()
-    plt.close()
 
     # load the damage_model.txt
-    damage_list = RoadDamage.read('data/damage_model.txt')
+    damage_list = RoadDamage.read('data/' + SCENARIO_NAME + '/damage_model.json')
 
-    # visualize the probmap only near the damage area
-    # get the damage area
-    damage_area = []
-    for damage in damage_list:
-        damage_area.append(damage.shape.bounds)
-    damage_area = np.array(damage_area)
-    damage_area = damage_area.reshape(-1, 4)
-    damage_area = np.unique(damage_area, axis=0)
-    plot_margin = 20
-    # get the min and max of the damage area
-    damage_x_min = np.min(damage_area[:, 0]) - plot_margin
-    damage_x_max = np.max(damage_area[:, 2]) + plot_margin
-    damage_y_min = np.min(damage_area[:, 1]) - plot_margin
-    damage_y_max = np.max(damage_area[:, 3]) + plot_margin
-    # slice the probmap only within the damage area, first onvert the damage area to the probmap indices
-    damage_x_min_idx = int((damage_x_min - X_MIN) / RESOLUTION)
-    damage_x_max_idx = int((damage_x_max - X_MIN) / RESOLUTION)
-    damage_y_min_idx = int((damage_y_min - Y_MIN) / RESOLUTION)
-    damage_y_max_idx = int((damage_y_max - Y_MIN) / RESOLUTION)
-    # slice the probmap
-    probmap_sliced = probmap[damage_y_min_idx:damage_y_max_idx, damage_x_min_idx:damage_x_max_idx]
+    damage_coords = gen_damage_area(damage_list, X_MIN, X_MAX, Y_MIN, Y_MAX, RESOLUTION, plot_margin=20)
 
-    # get the probmap only in the damage area
-    # plot the probmap_sliced
-    plt.figure(figsize=(8, 8))
-    plt.imshow(probmap_sliced, origin='lower', extent=(damage_x_min, damage_x_max, damage_y_min, damage_y_max))
-    plt.colorbar(label='P(occupied)')
-    plt.title('Road Anomaly Occupancy Grid Map (Sliced)')
-    plt.xlabel('X [m]')
-    plt.ylabel('Y [m]')
-    plt.savefig('image/occupancy_grid_sliced_' + str(SIM_STEPS) + '.png', dpi=300, bbox_inches='tight')
-    plt.show()
-    plt.close()
+
+
+    # plot the probmap for each road anomaly type
+    for anomaly_type in sensor.anomaly_types:
+        # why is probmap empty
+        # show the maximum probability of the probmap which is not nan
+        probmap = probmap_dict[anomaly_type]
+        probmap = np.nan_to_num(probmap, nan=0.0)  # replace NaN with 0
+        print("Max probability in probmap for {} is: {}".format(anomaly_type, np.max(probmap_dict[anomaly_type])) )
+
+        plt.figure(figsize=(8, 8))
+        plt.imshow(probmap, origin='lower', extent=(X_MIN, X_MAX, Y_MIN, Y_MAX))
+        plt.colorbar(label='P(occupied)')
+        plt.title('Road Damage Occupancy Grid Map (Final)')
+        plt.xlabel('X [m]')
+        plt.ylabel('Y [m]')
+        plt.savefig('image/occupancy_grid_' + anomaly_type + str(SIM_STEPS) + '.png', dpi=300, bbox_inches='tight')
+        plt.show()
+        plt.close()
+
+        probmap_sliced = probmap[damage_coords['y_min_idx']:damage_coords['y_max_idx'], damage_coords['x_min_idx']:damage_coords['x_max_idx']]
+        plt.figure(figsize=(8, 8))
+        plt.imshow(probmap_sliced, origin='lower', extent=(damage_coords['x_min'], damage_coords['x_max'], damage_coords['y_min'], damage_coords['y_max']))
+        plt.colorbar(label='P(occupied)')
+        plt.title('Road Anomaly Occupancy Grid Map (Sliced)')
+        plt.xlabel('X [m]')
+        plt.ylabel('Y [m]')
+        plt.savefig('image/occupancy_grid_sliced_' + anomaly_type + str(SIM_STEPS) + '.png', dpi=300, bbox_inches='tight')
+        plt.show()
+        plt.close()
+
+
+
+
 
     # Convert detections to arrays
     x_coords = np.array([d.x for d in detections if d.detected])

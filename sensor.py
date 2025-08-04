@@ -20,7 +20,7 @@ class VehicleSensor:
     def __init__(self, prob_dict, gps_sigma=5.0,
                  max_range=None, damage_model: RoadDamage = None):
         self.prob_dict = prob_dict
-        self._anomaly_types = [
+        self.anomaly_types = [
             k for k in prob_dict.keys() if k != "mild_road"]
         self.gps_sigma = gps_sigma
         self.max_range = max_range
@@ -53,7 +53,7 @@ class VehicleSensor:
             # possibility of false positive (false alarm) of driving on a mild road
             p_false = self.prob_dict['mild_road']['fp']
             if np.random.rand() < p_false:
-                road_anomaly_type = np.random.choice(self._anomaly_types) # assume each of the K road anomaly types has the same chance of being detected
+                road_anomaly_type = np.random.choice(self.anomaly_types) # assume each of the K road anomaly types has the same chance of being detected
                 return True, road_anomaly_type
             else:
                 # if the false positive fails, it is a true negative

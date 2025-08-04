@@ -1,6 +1,7 @@
 import logging
 
 from shapely.geometry import Point, Polygon, LineString
+from shapely import wkt  # Ensure this import is present
 
 import xml.etree.ElementTree as ET
 import sumolib
@@ -155,7 +156,8 @@ class RoadDamage:
                     'centroid': (damage.shape.centroid.x, damage.shape.centroid.y),
                     'probability': damage.probability,
                     'severity': damage.severity,
-                    'road_anomaly_type': damage.type
+                    'road_anomaly_type': damage.type,
+                    'shape': damage.shape.wkt  # Save as WKT for easier JSON serialization
                 })
             else:
                 # Save point coordinates
@@ -172,12 +174,24 @@ class RoadDamage:
 
     @staticmethod
     def read(filename: str) -> list[Damage]:
-        """Read the damage model from a file."""
-        damages = []
+        """Read the damage model from a json file."""
         with open(filename, 'r') as f:
-            for line in f:
-                parts = line.strip().split()
-                if len(parts) == 3:
-                    id, x, y = parts
-                    damages.append(Damage(id=id, x=float(x), y=float(y)))
+            data = json.load(f)
+        damages = []
+        for item in data:
+            if 'shape' in item:
+                # Polygon damage
+                shape = wkt.loads(item['shape'])
+                damages.append(Damage(id=item['id'], shape=shape,
+                                      probability=item['probability'],
+                                      severity=item['severity'],
+                                      road_anomaly_type=item['road_anomaly_type']))
+            else:
+                # Point damage
+                point = Point(item['point'])
+                damages.append(Damage(id=item['id'], x=point.x, y=point.y,
+                                      probability=item['probability'],
+                                      severity=item['severity'],
+                                      road_anomaly_type=item['road_anomaly_type']))
         return damages
+
