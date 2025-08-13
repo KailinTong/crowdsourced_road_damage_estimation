@@ -30,8 +30,7 @@ class OccupancyGrid:
         self.resolution = resolution
         self.default_lane_width = 3.2
         self.prior = prior #
-        self.prior_mild_road = prior_mild_road # TODO set a prior for mild road, this will be used to set the prior for the mild road cells (no damage)
-
+        self.prior_mild_road = prior_mild_road
         # self.prob_dict = prob_dict
         self.prob_threshold = prob_threshold  # threshold for filtering results
         self.sensor = sensor

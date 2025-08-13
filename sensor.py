@@ -101,10 +101,6 @@ class VehicleSensor:
         """
         x_est, y_est = self.sample_gps(x, y)  # TODO new feature... generate the car with lateral movement distribution?
 
-        # TODO doulbe check the logic of generating detections
-        # TODO save tp and fp in the detection object
-        # TODO is the reporting of position okay? it is not exactly the position of the damage, but the position of the vehicle when it detects the damage
-
         # check each damage shape if it detects the travel path
         for damage in self.damage_model.all_damages():
             # the travel path intersects with the damage width, so it might hit the damage
