@@ -9,7 +9,7 @@ from sumo_interface import SumoInterface
 from fusion import FusionEngine
 from road_damage import RoadDamage
 from typing import Dict, List
-from utilities import load_road_anomaly_metrics, gen_damage_area, visualize_clustered_map
+from utilities import load_road_anomaly_metrics, gen_damage_area, visualize_clustered_map, compare_anomaly_results
 import traci
 
 # --- USER CONFIG ---
@@ -45,8 +45,8 @@ DECAY_RATE = 0.1 # decay rate for the occupancy grid
 SMOOTHING_SIGMA = 1.0  # sigma for the gaussian smoothing
 SIM_STEPS = 3600  # number of simulation steps
 SPEED_THRESHOLD = 5 # speed threshold for detecting damage This also used in i
-PROB_THRESHOLD = 0.4
-
+PROB_THRESHOLD = 0.5
+NEIGHBOR_DEPTH = 5
 
 
 
@@ -114,13 +114,14 @@ def analyze(detection_file_name):
             detections.append(Detection(float(x), float(y), int(step), detected == 'True', road_anomaly_type, evaluation))
 
     sensor = VehicleSensor(PROB_DICT, GPS_SIGMA, None)
-    grid = OccupancyGrid(NET_FILE, sensor, RESOLUTION, None, PRIOR_MILD, MARGIN, OVERLAP_STEPS, DECAY_RATE, SMOOTHING_SIGMA, PROB_THRESHOLD)
+    grid = OccupancyGrid(NET_FILE, sensor, RESOLUTION, None, PRIOR_MILD, MARGIN, OVERLAP_STEPS, DECAY_RATE, SMOOTHING_SIGMA, PROB_THRESHOLD, NEIGHBOR_DEPTH)
     X_MIN, X_MAX, Y_MIN, Y_MAX = grid.x_min, grid.x_max, grid.y_min, grid.y_max
 
     grid.batch_update(detection_file_name,  batch_size=BATCH_SIZE)
     probmap_dict = grid.gen_probability_map()
     # filter results
-    max_prob_map, filtered_prob_map, filtered_prob_map_type, clustered_prob_map, clustered_type_map, region_id_map = grid.filter_results()
+    export_json_path = "data/" + SCENARIO_NAME + "/result_" + str(SIM_STEPS) + ".json"
+    max_prob_map, filtered_prob_map, filtered_prob_map_type, clustered_prob_map, clustered_type_map, region_id_map = grid.filter_results(average_neighbors=True, export_json_path=export_json_path)
 
 
     # load the damage_model.txt
@@ -220,9 +221,9 @@ def analyze(detection_file_name):
 
     visualize_clustered_map(clustered_prob_map, filtered_prob_map_type, region_id_map, save_path="image/" + SCENARIO_NAME + '/clustered_probability_map_' + str(SIM_STEPS) + '.png',)
 
-
-
-
+    results = compare_anomaly_results(gt_json_path="data/" + SCENARIO_NAME + '/damage_model.json', det_json_path="data/" + SCENARIO_NAME + '/result_' + str(SIM_STEPS) + ".json",
+                                      save_path="image/" + SCENARIO_NAME + "/compare_" + str(SIM_STEPS) + ".png", containment_threshold=0.5)
+    print(results)
 
 
 

@@ -1,9 +1,6 @@
 from typing import Dict
 import json
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-import matplotlib.patheffects as pe
+from shapely.wkt import loads as load_wkt
 
 # laod the probability dictionary from the json file
 def load_road_anomaly_metrics(path: str = "data/road_anomaly_metrics.json") -> Dict[str, Dict[str, float]]:
@@ -187,3 +184,131 @@ def visualize_clustered_map(
     plt.savefig(save_path)
     plt.show()
     plt.close()
+
+
+
+
+def compare_anomaly_results(gt_json_path: str, det_json_path: str, save_path: str, containment_threshold: float)-> dict:
+    """
+    Compare detected road anomalies against ground truth using containment/overlap.
+    Also plots both sets for visual inspection.
+
+    Matching rule:
+        A detection matches a GT if they share the same anomaly type AND
+        (GT area in detection / GT area) >= containment_threshold.
+
+    Args:
+        gt_json_path (str): Ground truth JSON.
+        det_json_path (str): Detection result JSON.
+        containment_threshold (float): Min fraction of GT covered by detection.
+
+    Returns:
+        dict: KPIs and match list.
+    """
+    # Load JSON files
+    with open(gt_json_path, "r") as f:
+        gt_data = json.load(f)
+    with open(det_json_path, "r") as f:
+        det_data = json.load(f)
+
+    # Parse polygons
+    gt_polys = [(g["road_anomaly_type"], g["severity"], load_wkt(g["shape"])) for g in gt_data]
+    det_polys = [(d["road_anomaly_type"], d["severity"], load_wkt(d["shape"])) for d in det_data]
+
+    matches = []
+    used_gt = set()
+    used_det = set()
+
+    # Matching: same type + containment/overlap
+    for det_idx, (det_type, det_sev, det_poly) in enumerate(det_polys):
+        best_cover = 0
+        best_gt_idx = None
+        for gt_idx, (gt_type, gt_sev, gt_poly) in enumerate(gt_polys):
+            if gt_idx in used_gt:
+                continue
+            if gt_type != det_type:
+                continue
+            if not det_poly.is_valid or not gt_poly.is_valid:
+                continue
+
+            if det_poly.intersects(gt_poly):
+                cover_ratio = det_poly.intersection(gt_poly).area / gt_poly.area
+                if cover_ratio > best_cover:
+                    best_cover = cover_ratio
+                    best_gt_idx = gt_idx
+
+        if best_gt_idx is not None and best_cover >= containment_threshold:
+            matches.append({
+                "det_idx": det_idx,
+                "gt_idx": best_gt_idx,
+                "cover_ratio": best_cover,
+                "severity": det_sev
+            })
+            used_gt.add(best_gt_idx)
+            used_det.add(det_idx)
+
+    # KPIs
+    TP = len(matches)
+    FP = len(det_polys) - TP
+    FN = len(gt_polys) - TP
+    precision = TP / (TP + FP) if TP + FP > 0 else 0
+    recall = TP / (TP + FN) if TP + FN > 0 else 0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    mean_cover = sum(m["cover_ratio"] for m in matches) / TP if TP > 0 else 0
+
+    results = {
+        "overall": {
+            "true_positives": TP,
+            "false_positives": FP,
+            "false_negatives": FN,
+            "precision": precision,
+            "recall": recall,
+            "f1_score": f1,
+            "mean_cover_ratio": mean_cover
+        },
+        "matches": matches,
+        "per_severity": {}
+    }
+
+    # Per-severity stats
+    severities = {"l", "m", "h"}
+    for sev in severities:
+        gt_sev = [i for i, (_, s, _) in enumerate(gt_polys) if s == sev]
+        det_sev = [i for i, (_, s, _) in enumerate(det_polys) if s == sev]
+        TP_s = sum(1 for m in matches if m["severity"] == sev)
+        FP_s = len(det_sev) - TP_s
+        FN_s = len(gt_sev) - TP_s
+        prec_s = TP_s / (TP_s + FP_s) if TP_s + FP_s > 0 else 0
+        rec_s = TP_s / (TP_s + FN_s) if TP_s + FN_s > 0 else 0
+        f1_s = 2 * prec_s * rec_s / (prec_s + rec_s) if (prec_s + rec_s) > 0 else 0
+        mean_cover_s = (sum(m["cover_ratio"] for m in matches if m["severity"] == sev) / TP_s) if TP_s > 0 else 0
+
+        results["per_severity"][sev] = {
+            "true_positives": TP_s,
+            "false_positives": FP_s,
+            "false_negatives": FN_s,
+            "precision": prec_s,
+            "recall": rec_s,
+            "f1_score": f1_s,
+            "mean_cover_ratio": mean_cover_s
+        }
+
+    # Plot for visual verification
+    fig, ax = plt.subplots(figsize=(8, 8))
+    for _, _, poly in gt_polys:
+        x, y = poly.exterior.xy
+        ax.plot(x, y, color="blue", label="Ground Truth" if "Ground Truth" not in ax.get_legend_handles_labels()[1] else "")
+    for _, _, poly in det_polys:
+        x, y = poly.exterior.xy
+        ax.plot(x, y, color="red", linestyle="--", label="Detection" if "Detection" not in ax.get_legend_handles_labels()[1] else "")
+    ax.set_aspect("equal", adjustable="box")
+    ax.legend()
+    ax.set_title("Ground Truth (blue) vs Detection (red)")
+    # save the image in the same folder
+    plt.savefig(save_path)
+    plt.show()
+    plt.close()
+
+    return results
+
+

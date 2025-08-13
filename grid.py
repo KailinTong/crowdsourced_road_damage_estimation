@@ -3,11 +3,15 @@ import xml.etree.ElementTree as ET
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter
 from utilities import load_road_anomaly_metrics
-from road_anomaly_collision_model import NET_FILE
+from road_anomaly_collision_model import NET_FILE, SCENARIO_NAME
 from scipy.ndimage import label, measurements
 from matplotlib import cm
 from sensor import VehicleSensor
 from collections import deque
+import json
+from shapely.geometry import Polygon, MultiPolygon
+from shapely.ops import unary_union
+from shapely.affinity import translate
 
 class OccupancyGrid:
     def __init__(self, net_file, sensor, resolution=1.0, prior=None, prior_mild_road=0.05, margin=5.0, overlap_steps=20, decay_rate=0.1, smoothing_sigma=1.0, prob_threshold = 0.5, neighbor_depth=2):
@@ -177,7 +181,54 @@ class OccupancyGrid:
             return i, j
         return None
 
+    def grid_to_world(self, i, j):
+        """Center of grid cell (i,j) in world coords."""
+        x = self.x_min + (j + 0.5) * self.resolution
+        y = self.y_min + (i + 0.5) * self.resolution
+        return x, y
 
+    def _polygon_from_region(self, ij_list):
+        """
+        Build a convex hull polygon from a region of (i,j) grid cells using
+        their center points. Ensures the polygon is valid for WKT.
+        """
+        # Convert to (x,y) world coordinates
+        pts = [self.grid_to_world(i, j) for (i, j) in ij_list]
+        pts = sorted(set(pts))  # remove duplicates
+
+        # Handle degenerate cases
+        if len(pts) < 3:
+            # Not enough points for a polygon — return a tiny triangle
+            if len(pts) == 1:
+                x, y = pts[0]
+                pts = [(x, y), (x + 0.01, y), (x, y + 0.01)]
+            elif len(pts) == 2:
+                (x1, y1), (x2, y2) = pts
+                mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+                pts = [pts[0], pts[1], (mx, my + 0.01)]
+            pts.append(pts[0])  # close polygon
+            return pts
+
+        # Convex hull using monotonic chain
+        def cross(o, a, b):
+            return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+        lower = []
+        for p in pts:
+            while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+                lower.pop()
+            lower.append(p)
+
+        upper = []
+        for p in reversed(pts):
+            while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+                upper.pop()
+            upper.append(p)
+
+        hull = lower[:-1] + upper[:-1]
+        if hull[0] != hull[-1]:
+            hull.append(hull[0])  # close polygon
+        return hull
 
     def _apply_hits_k_road_anomaly(self, hits_dict: dict) -> None:
         """
@@ -354,33 +405,40 @@ class OccupancyGrid:
 
         return clustered_prob_map, clustered_type_map, region_id_map
 
-    def filter_results(self, average_neighbors=False):
+    def filter_results(self, average_neighbors=False, export_json_path=None):
         """
         Generate a filtered map:
         - For each cell, determine the anomaly type with max probability.
         - Filter out those below a threshold, set to fallback value.
         - Assign unique IDs to connected regions of the same anomaly type.
-        - Optionally, average probabilities over each region.
+        - Average probabilities over each region.
+        - If export_json_path is provided, write clustered regions to JSON using the
+          same schema as the uploaded example. Severity is parsed from the anomaly
+          type name (e.g., 'pothole_l' -> severity 'l').
 
         Returns:
-            filtered_prob_map (np.ndarray): thresholded max probability map
-            max_prob_map_type (np.ndarray): map of anomaly type string for max probability
-            region_id_map (np.ndarray): map of region IDs (0 = no region, >0 = unique ID)
-            avg_prob_map (np.ndarray or None): map with region-averaged probability (if average_neighbors)
+            max_prob_map (np.ndarray)
+            filtered_prob_map (np.ndarray)
+            filtered_prob_map_type (np.ndarray)
+            clustered_prob_map (np.ndarray)
+            clustered_type_map (np.ndarray)
+            region_id_map (np.ndarray)
         """
 
+
+
+        # --- sanity ---
         if not self.sensor.anomaly_types:
             raise RuntimeError("No road anomaly types in OccupancyGrid.")
 
         # Step 1: Find per-cell max probability and type
-        max_prob_map = np.full_like(self.log_odds_dict[self.sensor.anomaly_types[0]], np.nan, dtype=float)
+        any_key = self.sensor.anomaly_types[0]
+        max_prob_map = np.full_like(self.log_odds_dict[any_key], np.nan, dtype=float)
         max_prob_map_type = np.full(max_prob_map.shape, '', dtype='U32')
 
         for anomaly_type in self.sensor.anomaly_types:
             prob_map = self._logodds_to_prob(self.log_odds_dict[anomaly_type])
             mask = ~np.isnan(prob_map)
-
-            # update where we either have no value yet (NaN) OR a strictly larger prob
             update_mask = mask & (np.isnan(max_prob_map) | (prob_map > max_prob_map))
             max_prob_map[update_mask] = prob_map[update_mask]
             max_prob_map_type[update_mask] = anomaly_type
@@ -399,8 +457,7 @@ class OccupancyGrid:
             np.where(max_prob_map >= self.prob_threshold, max_prob_map_type, 'mild_road')
         )
 
-        # --- Step 3: Cluster by filtered type, average probs per cluster ---
-        # Initialize outputs
+        # Step 3: Cluster by filtered type, average probs per cluster
         clustered_prob_map, clustered_type_map, region_id_map = self.cluster_by_type_keep_nan(
             filtered_prob_map,
             filtered_prob_map_type,
@@ -408,16 +465,86 @@ class OccupancyGrid:
             include_mild_road=True
         )
 
+        # Step 4 (optional): Export clusters to JSON (severity based on anomaly type name)
+        if export_json_path is not None:
+            H, W = clustered_prob_map.shape
+
+            # Gather cells by region_id
+            regions = {}
+            for i in range(H):
+                for j in range(W):
+                    rid = region_id_map[i, j]
+                    t = clustered_type_map[i, j]
+                    p = clustered_prob_map[i, j]
+                    if rid == 'na' or t == 'na' or np.isnan(p):
+                        continue
+                    # skip mild_road in export
+                    if t == 'mild_road':
+                        continue
+                    regions.setdefault(rid, {"type": t, "cells": []})
+                    regions[rid]["cells"].append((i, j))
+
+            out = []
+            for rid, info in regions.items():
+                t = info["type"]  # e.g., 'pothole_h' -> severity 'h'
+                cells = info["cells"]
+                if not cells:
+                    continue
+
+                # probability is constant across region by construction (still average to be safe)
+                ps = [clustered_prob_map[i, j] for (i, j) in cells]
+                p_avg = float(np.mean(ps))
+
+                # centroid in world coords
+                xy = [self.grid_to_world(i, j) for (i, j) in cells]
+                cx = float(np.mean([x for x, _ in xy]))
+                cy = float(np.mean([y for _, y in xy]))
+
+                # polygon from convex hull of centers
+                poly = self._polygon_from_region(cells)
+
+                # parse severity from anomaly type name (final token l/m/h)
+                base, sev = t, ""
+                parts = t.rsplit("_", 1)
+                if len(parts) == 2 and parts[1] in {"l", "m", "h"}:
+                    base, sev = parts[0], parts[1]
+                else:
+                    # if no explicit severity suffix, keep entire t as base and leave sev empty
+                    base, sev = t, ""
+
+                # id should match uploaded style: '<base>_<k>' (without severity)
+                # rid is like '<type>_<k>', where <type> may include severity
+                # extract <k>:
+                k = rid.rsplit("_", 1)[-1] if "_" in rid else rid
+                obj_id = f"{base}_{k}"
+
+                # road_anomaly_type is the original clustered type (keeps severity)
+                road_anomaly_type = t
+
+                # WKT-like POLYGON
+                coords_str = ", ".join([f"{x:.6f} {y:.6f}" for (x, y) in poly])
+                shape_wkt = f"POLYGON (({coords_str}))"
+
+                out.append({
+                    "id": obj_id,
+                    "centroid": [cx, cy],
+                    "probability": round(p_avg, 3),
+                    "severity": sev,
+                    "road_anomaly_type": road_anomaly_type,
+                    "shape": shape_wkt
+                })
+
+            with open(export_json_path, "w") as f:
+                json.dump(out, f, indent=4)
+
         return (
             max_prob_map,
             filtered_prob_map,
             filtered_prob_map_type,
             clustered_prob_map,
-            clustered_type_map,  # <-- new
+            clustered_type_map,
             region_id_map
         )
-
-
 
     @staticmethod
     def _prob_to_logodds(p):
