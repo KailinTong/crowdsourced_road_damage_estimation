@@ -7,17 +7,33 @@ from road_anomaly_collision_model import NET_FILE
 from scipy.ndimage import label, measurements
 from matplotlib import cm
 from sensor import VehicleSensor
+from collections import deque
 
 class OccupancyGrid:
-    def __init__(self, net_file, sensor, resolution=1.0, prior=0.8, margin=5.0, overlap_steps=20, decay_rate=0.1, smoothing_sigma=1.0, pro_threshold = 0.5):
+    def __init__(self, net_file, sensor, resolution=1.0, prior=None, prior_mild_road=0.05, margin=5.0, overlap_steps=20, decay_rate=0.1, smoothing_sigma=1.0, prob_threshold = 0.5, neighbor_depth=2):
+        """
+        Initialize the OccupancyGrid with the given parameters.
+        :param net_file: network file containing lane shapes
+        :param sensor: sensor object containing road anomaly probabilities
+        :param resolution: resolution of the grid in meters
+        :param prior: prior probability of occupancy. This is a numpy array where each cell is the prior probability of occupancy.
+        :param margin: margin distance for extending the occupancy grid map
+        :param overlap_steps: overlap steps for generating the grid, this fixes the gaps between
+        :param decay_rate: decay rate for the occupancy grid, how much the log-odds will decay towards the prior
+        :param smoothing_sigma: sigma for the gaussian smoothing applied to the log-odds
+        :param prob_threshold: probability threshold for filtering results, below this value, the cell will be set to prior
+        :param neighbor_depth: number of neighboring cells to consider for clustering
+        """
 
         self.decay_rate = decay_rate
         self.smoothing_sigma = smoothing_sigma
         self.resolution = resolution
         self.default_lane_width = 3.2
-        self.prior = prior # TODO: this will be updated based on each grid according to the satellite data
+        self.prior = prior #
+        self.prior_mild_road = prior_mild_road # TODO set a prior for mild road, this will be used to set the prior for the mild road cells (no damage)
+
         # self.prob_dict = prob_dict
-        self.pro_threshold = pro_threshold  # threshold for filtering results
+        self.prob_threshold = prob_threshold  # threshold for filtering results
         self.sensor = sensor
         self.prob_map_dict = None
         # remove "mild_road" from the probability dictionary if it exists and create a new dictionary
@@ -30,11 +46,12 @@ class OccupancyGrid:
         self.width = int(np.ceil((self.x_max - self.x_min) / resolution))
         self.height = int(np.ceil((self.y_max - self.y_min) / resolution))
         self.overlap_steps = overlap_steps
+        self.neighbor_depth = neighbor_depth  # how many neighbors to consider for clustering
 
         # Initialize the log-odds dictionary, the key is the road anomaly types. and it will hold the log-odds values for each grid cell, the key
         self.log_odds_dict = {anomaly_type: np.full((self.height, self.width), np.nan) for anomaly_type in self.sensor.anomaly_types}
         # self.log_odds = np.full((self.height, self.width), np.nan)
-        self._parse_and_draw_lanes(net_file, p_z=prior)
+        self._parse_and_draw_lanes(net_file, p_z=prior_mild_road)
 
     def _compute_bounds(self, net_file, margin):
 
@@ -196,9 +213,13 @@ class OccupancyGrid:
 
             # 2) Apply decay towards prior
             a = self.decay_rate
-            prior_log_odds = np.log(self.prior / (1 - self.prior))
-            self.log_odds_dict[anomaly_type][valid] = (1 - a) * self.log_odds_dict[anomaly_type][valid] + a * prior_log_odds
-
+            if self.prior is None:
+                prior_log_odds = np.log(self.prior_mild_road / (1 - self.prior_mild_road))
+                self.log_odds_dict[anomaly_type][valid] = (1 - a) * self.log_odds_dict[anomaly_type][valid] + a * prior_log_odds
+            else:
+                # here prior is an numpy array, so we need to compute the log-odds for each cell
+                prior_log_odds = np.log(self.prior / (1 - self.prior))
+                self.log_odds_dict[anomaly_type][valid] = (1 - a) * self.log_odds_dict[anomaly_type][valid] + a * prior_log_odds
             # 3) Apply Gaussian smoothing
             self.log_odds_dict[anomaly_type][valid] = gaussian_filter(
             self.log_odds_dict[anomaly_type][valid],
@@ -250,11 +271,95 @@ class OccupancyGrid:
         self.prob_map_dict = prob_map_dict
         return prob_map_dict
 
+    @staticmethod
+    def cluster_by_type_keep_nan(
+            filtered_prob_map: np.ndarray,
+            filtered_prob_map_type: np.ndarray,
+            neighbor_depth: int = 1,
+            include_mild_road: bool = True,
+    ):
+        """
+        Clusters contiguous cells of the SAME filtered type using a square neighborhood of size (2D+1).
+        - Keeps NaNs in clustered_prob_map as NaN.
+        - Skips NaN cells from clustering entirely.
+        - Optionally include 'mild_road' in clustering.
+
+        Returns:
+            clustered_prob_map: region-averaged probabilities (NaN preserved)
+            clustered_type_map: same type per region
+            region_id_map: IDs like '<type>_<k>' or 'na' for NaN/empty
+        """
+        H, W = filtered_prob_map.shape
+        assert filtered_prob_map_type.shape == (H, W)
+
+        clustered_prob_map = np.full_like(filtered_prob_map, np.nan)
+        clustered_type_map = np.full(filtered_prob_map_type.shape, 'na', dtype='U64')
+        region_id_map = np.full(filtered_prob_map.shape, 'na', dtype='U64')
+
+        visited = np.zeros((H, W), dtype=bool)
+        cur_id = 1
+
+        for i in range(H):
+            for j in range(W):
+                if visited[i, j]:
+                    continue
+
+                # skip NaNs: keep NaN, no cluster, mark visited
+                if np.isnan(filtered_prob_map[i, j]):
+                    visited[i, j] = True
+                    continue
+
+                t = filtered_prob_map_type[i, j]
+                if t == 'na':
+                    visited[i, j] = True
+                    continue
+                if (t == 'mild_road') and not include_mild_road:
+                    visited[i, j] = True
+                    continue
+
+                # BFS on same TYPE; NaNs won't be enqueued (we already skip them)
+                q = deque([(i, j)])
+                visited[i, j] = True
+                pix = []
+
+                while q:
+                    ci, cj = q.popleft()
+
+                    # accept only exact type matches & finite probs
+                    if filtered_prob_map_type[ci, cj] != t or np.isnan(filtered_prob_map[ci, cj]):
+                        continue
+
+                    pix.append((ci, cj))
+
+                    for di in range(-neighbor_depth, neighbor_depth + 1):
+                        for dj in range(-neighbor_depth, neighbor_depth + 1):
+                            if di == 0 and dj == 0:
+                                continue
+                            ni, nj = ci + di, cj + dj
+                            if 0 <= ni < H and 0 <= nj < W and not visited[ni, nj]:
+                                if (filtered_prob_map_type[ni, nj] == t) and not np.isnan(filtered_prob_map[ni, nj]):
+                                    visited[ni, nj] = True
+                                    q.append((ni, nj))
+
+                if not pix:
+                    continue
+
+                rr, cc = zip(*pix)
+                avg_p = float(np.mean(filtered_prob_map[rr, cc]))
+
+                clustered_prob_map[rr, cc] = avg_p
+                clustered_type_map[rr, cc] = t
+                label = f"{t}_{cur_id}"
+                region_id_map[rr, cc] = label
+                cur_id += 1
+
+        return clustered_prob_map, clustered_type_map, region_id_map
+
     def filter_results(self, average_neighbors=False):
         """
         Generate a filtered map:
         - For each cell, determine the anomaly type with max probability.
-        - Filter out those below threshold, set to fallback value.
+        - Filter out those below a threshold, set to fallback value.
         - Assign unique IDs to connected regions of the same anomaly type.
         - Optionally, average probabilities over each region.
 
@@ -269,49 +374,50 @@ class OccupancyGrid:
             raise RuntimeError("No road anomaly types in OccupancyGrid.")
 
         # Step 1: Find per-cell max probability and type
-        max_prob_map = np.full_like(self.log_odds_dict[self.sensor.anomaly_types[0]], 0)
-        max_prob_map_type = np.full(max_prob_map.shape, '', dtype='U32')  # Unicode for type names
+        max_prob_map = np.full_like(self.log_odds_dict[self.sensor.anomaly_types[0]], np.nan, dtype=float)
+        max_prob_map_type = np.full(max_prob_map.shape, '', dtype='U32')
 
         for anomaly_type in self.sensor.anomaly_types:
             prob_map = self._logodds_to_prob(self.log_odds_dict[anomaly_type])
-            # find where the probability map is valid (not NaN)
             mask = ~np.isnan(prob_map)
 
-            # compare the region with the current max probability map, where the current probability map is greater than the max probability map
-            update_mask = mask &  (prob_map > max_prob_map)
-            # update_mask = mask & ((np.isnan(max_prob_map)) | (prob_map > max_prob_map))
+            # update where we either have no value yet (NaN) OR a strictly larger prob
+            update_mask = mask & (np.isnan(max_prob_map) | (prob_map > max_prob_map))
             max_prob_map[update_mask] = prob_map[update_mask]
             max_prob_map_type[update_mask] = anomaly_type
 
-        # Step 2: Thresholding, find out where max probability is above threshold, for those are not nan less than threshold,
-        # give them a prior value
-        filtered_prob_map = np.where( (max_prob_map >= self.pro_threshold) & ~np.isnan(max_prob_map),
-                                      max_prob_map, self.prior)
+        # Step 2: preserve NaNs; keep values >= threshold; otherwise set to prior_mild_road
+        filtered_prob_map = np.where(
+            np.isnan(max_prob_map),
+            np.nan,
+            np.where(max_prob_map >= self.prob_threshold, max_prob_map, float(self.prior_mild_road))
+        )
 
+        # Type map: NaN -> 'na'; >= threshold -> winning type; else -> 'mild_road'
+        filtered_prob_map_type = np.where(
+            np.isnan(max_prob_map),
+            'na',
+            np.where(max_prob_map >= self.prob_threshold, max_prob_map_type, 'mild_road')
+        )
 
-        # Step 3: Connected component labeling per anomaly type
-        region_id_map = np.zeros_like(max_prob_map, dtype=np.int32)
-        next_region_id = 1
-        for anomaly_type in self.sensor.anomaly_types:
-            mask = (max_prob_map_type == anomaly_type)
-            # Label connected regions (4-connectivity)
-            labeled, num_features = label(mask)
-            # Offset region IDs to make each unique
-            labeled[labeled > 0] += next_region_id - 1
-            region_id_map += labeled
-            next_region_id += num_features
+        # --- Step 3: Cluster by filtered type, average probs per cluster ---
+        # Initialize outputs
+        clustered_prob_map, clustered_type_map, region_id_map = self.cluster_by_type_keep_nan(
+            filtered_prob_map,
+            filtered_prob_map_type,
+            neighbor_depth=self.neighbor_depth,
+            include_mild_road=True
+        )
 
-        avg_prob_map = None
-        if average_neighbors:
-            avg_prob_map = np.full_like(max_prob_map, np.nan)
-            for region_id in np.unique(region_id_map):
-                if region_id == 0:
-                    continue
-                region_mask = (region_id_map == region_id)
-                mean_val = np.nanmean(filtered_prob_map[region_mask])
-                avg_prob_map[region_mask] = mean_val
+        return (
+            max_prob_map,
+            filtered_prob_map,
+            filtered_prob_map_type,
+            clustered_prob_map,
+            clustered_type_map,  # <-- new
+            region_id_map
+        )
 
-        return filtered_prob_map, max_prob_map_type, region_id_map, avg_prob_map
 
 
     @staticmethod
@@ -375,97 +481,10 @@ if __name__ == "__main__":
         plt.close()
 
 
-    # Plot the maximum probability map
-    filtered_prob_map, max_prob_map_type, region_id_map, avg_prob_map = grid.filter_results(average_neighbors=True)
-
-    plt.figure(figsize=(12, 10))
-    masked = np.ma.masked_where(np.isnan(filtered_prob_map), filtered_prob_map)
-    img = plt.imshow(
-        masked,
-        cmap='viridis',
-        origin='lower',
-        extent=[grid.x_min, grid.x_max, grid.y_min, grid.y_max]
-    )
-    plt.colorbar(img, label='Filtered Max Occupancy Probability')
-    plt.title("Filtered Max Occupancy Grid Map")
-    plt.xlabel("X (meters)")
-    plt.ylabel("Y (meters)")
-    plt.grid(True, linestyle=':', linewidth=0.5)
-    plt.savefig("image/filtered_max_occupancy_grid_map.png", dpi=300, bbox_inches='tight')
-    plt.show()
-    plt.close()
-
-    import matplotlib.colors as mcolors
-
-    # Assign each anomaly type a unique integer
-    type_names = list(set(max_prob_map_type[max_prob_map_type != '']))
-    type_to_int = {typ: i for i, typ in enumerate(type_names)}
-    type_map = np.full_like(filtered_prob_map, -1, dtype=int)
-    for typ, i in type_to_int.items():
-        type_map[max_prob_map_type == typ] = i
-
-    cmap = plt.get_cmap('tab20', len(type_names))
-
-    plt.figure(figsize=(12, 10))
-    masked_type_map = np.ma.masked_where(type_map == -1, type_map)
-    img = plt.imshow(
-        masked_type_map,
-        cmap=cmap,
-        origin='lower',
-        extent=[grid.x_min, grid.x_max, grid.y_min, grid.y_max],
-        vmin=0, vmax=len(type_names) - 1
-    )
-    # Create legend
-    cbar = plt.colorbar(img, ticks=np.arange(len(type_names)))
-    cbar.ax.set_yticklabels(type_names)
-    plt.title("Maximum Probability Anomaly Type Map")
-    plt.xlabel("X (meters)")
-    plt.ylabel("Y (meters)")
-    plt.grid(True, linestyle=':', linewidth=0.5)
-    plt.savefig("image/max_prob_type_map.png", dpi=300, bbox_inches='tight')
-    plt.show()
-    plt.close()
+    max_prob_map, filtered_prob_map, filtered_prob_map_type, clustered_prob_map = grid.filter_results(average_neighbors=True)
 
 
-    plt.figure(figsize=(12, 10))
-    region_ids = region_id_map.copy()
-    # Don't hide background, showisng the road region
-    region_ids[region_ids == 0] = np.nan
-    n_regions = int(np.nanmax(region_ids)) + 1
-    cmap_regions = cm.get_cmap('tab20', n_regions)
 
-    img = plt.imshow(
-        region_ids,
-        cmap=cmap_regions,
-        origin='lower',
-        extent=[grid.x_min, grid.x_max, grid.y_min, grid.y_max],
-    )
-    plt.colorbar(img, label='Region ID')
-    plt.title("Connected Region ID Map (per Anomaly Type)")
-    plt.xlabel("X (meters)")
-    plt.ylabel("Y (meters)")
-    plt.grid(True, linestyle=':', linewidth=0.5)
-    plt.savefig("image/region_id_map.png", dpi=300, bbox_inches='tight')
-    plt.show()
-    plt.close()
-
-    if avg_prob_map is not None:
-        plt.figure(figsize=(12, 10))
-        masked_avg = np.ma.masked_where(np.isnan(avg_prob_map), avg_prob_map)
-        img = plt.imshow(
-            masked_avg,
-            cmap='plasma',
-            origin='lower',
-            extent=[grid.x_min, grid.x_max, grid.y_min, grid.y_max]
-        )
-        plt.colorbar(img, label='Region-averaged Probability')
-        plt.title("Region-Averaged Probability Map")
-        plt.xlabel("X (meters)")
-        plt.ylabel("Y (meters)")
-        plt.grid(True, linestyle=':', linewidth=0.5)
-        plt.savefig("image/region_averaged_probability_map.png", dpi=300, bbox_inches='tight')
-        plt.show()
-        plt.close()
 
 
 

@@ -9,7 +9,7 @@ from sumo_interface import SumoInterface
 from fusion import FusionEngine
 from road_damage import RoadDamage
 from typing import Dict, List
-from utilities import load_road_anomaly_metrics, gen_damage_area
+from utilities import load_road_anomaly_metrics, gen_damage_area, visualize_clustered_map
 import traci
 
 # --- USER CONFIG ---
@@ -36,16 +36,16 @@ DAMAGE_EDGE_IDS = ['-4001.0.00', '-4002.0.00', '-5004.0.00']
 
 BATCH_SIZE = 360  # number of detections to process in one batch
 RESOLUTION = 1.0  # resolution of the grid in meters
-PRIOR = 0.1  # prior probability of occupancy
+PRIOR_MILD = 0.05  # prior probability of occupancy (assuming a mild road)
 MARGIN = 5.0  # margin distance for extending the occupancy grid map
 OVERLAP_STEPS = 20  # number of steps for the overlap during the generation of the grid, this fixes the gaps between
 # center line of connected edges
 GPS_SIGMA = 5.0  # GPS noise in meters
-DECAY_RATE = 0.2  # decay rate for the occupancy grid
+DECAY_RATE = 0.1 # decay rate for the occupancy grid
 SMOOTHING_SIGMA = 1.0  # sigma for the gaussian smoothing
 SIM_STEPS = 3600  # number of simulation steps
 SPEED_THRESHOLD = 5 # speed threshold for detecting damage This also used in i
-
+PROB_THRESHOLD = 0.4
 
 
 
@@ -105,6 +105,8 @@ def simulate():
 
 
 def analyze(detection_file_name):
+    # Create a copy of the default colormap and set the 'bad' (NaN) color
+
     with open(detection_file_name, 'r') as f:
         detections = []
         for line in f:
@@ -112,13 +114,13 @@ def analyze(detection_file_name):
             detections.append(Detection(float(x), float(y), int(step), detected == 'True', road_anomaly_type, evaluation))
 
     sensor = VehicleSensor(PROB_DICT, GPS_SIGMA, None)
-    grid = OccupancyGrid(NET_FILE, sensor, RESOLUTION, PRIOR, MARGIN, OVERLAP_STEPS, DECAY_RATE, SMOOTHING_SIGMA)
+    grid = OccupancyGrid(NET_FILE, sensor, RESOLUTION, None, PRIOR_MILD, MARGIN, OVERLAP_STEPS, DECAY_RATE, SMOOTHING_SIGMA, PROB_THRESHOLD)
     X_MIN, X_MAX, Y_MIN, Y_MAX = grid.x_min, grid.x_max, grid.y_min, grid.y_max
 
     grid.batch_update(detection_file_name,  batch_size=BATCH_SIZE)
     probmap_dict = grid.gen_probability_map()
     # filter results
-    filtered_prob_map, max_prob_map_type, region_id_map, avg_prob_map = grid.filter_results()
+    max_prob_map, filtered_prob_map, filtered_prob_map_type, clustered_prob_map, clustered_type_map, region_id_map = grid.filter_results()
 
 
     # load the damage_model.txt
@@ -161,66 +163,79 @@ def analyze(detection_file_name):
         plt.show()
         plt.close()
 
-        probmap_sliced = probmap[damage_coords['y_min_idx']:damage_coords['y_max_idx'], damage_coords['x_min_idx']:damage_coords['x_max_idx']]
-        plt.figure(figsize=(8, 8))
-        plt.imshow(probmap_sliced, origin='lower', extent=(damage_coords['x_min'], damage_coords['x_max'], damage_coords['y_min'], damage_coords['y_max']))
-        plt.colorbar(label='P(occupied)')
-        plt.title('Road Anomaly Occupancy Grid Map (Sliced)')
-        plt.xlabel('X [m]')
-        plt.ylabel('Y [m]')
-        plt.savefig('image/' + SCENARIO_NAME +  '/occupancy_grid_sliced_' + anomaly_type + str(SIM_STEPS) + '.png', dpi=300, bbox_inches='tight')
-        plt.show()
-        plt.close()
+        # probmap_sliced = probmap[damage_coords['y_min_idx']:damage_coords['y_max_idx'], damage_coords['x_min_idx']:damage_coords['x_max_idx']]
+        # plt.figure(figsize=(8, 8))
+        # plt.imshow(probmap_sliced, origin='lower', extent=(damage_coords['x_min'], damage_coords['x_max'], damage_coords['y_min'], damage_coords['y_max']))
+        # plt.colorbar(label='P(occupied)')
+        # plt.title('Road Anomaly Occupancy Grid Map (Sliced)')
+        # plt.xlabel('X [m]')
+        # plt.ylabel('Y [m]')
+        # plt.savefig('image/' + SCENARIO_NAME +  '/occupancy_grid_sliced_' + anomaly_type + str(SIM_STEPS) + '.png', dpi=300, bbox_inches='tight')
+        # plt.show()
+        # plt.close()
 
-
-    # visualize the average probability map
+    # plot the maximum probability map
     plt.figure(figsize=(8, 8))
-    plt.imshow(avg_prob_map, origin='lower', extent=(X_MIN, X_MAX,
-                                                         Y_MIN, Y_MAX), cmap='viridis')
-    plt.colorbar(label='Average P(occupied)')
-    plt.title('Average Road Damage Occupancy Grid Map')
+    plt.imshow(max_prob_map, origin='lower', extent=(X_MIN, X_MAX, Y_MIN, Y_MAX))
+    plt.colorbar(label='Max P(occupied)')
+    plt.title('Road Damage Maximum Probability Map (Final)')
     plt.xlabel('X [m]')
     plt.ylabel('Y [m]')
-    plt.savefig('image/' + SCENARIO_NAME +  '/average_occupancy_grid_' + str(SIM_STEPS) + '.png', dpi=300, bbox_inches='tight')
-    plt.show()
-
-    # visualize the maximum probability map
-    plt.figure(figsize=(8, 8))
-    plt.imshow(max_prob_map_type, origin='lower', extent=(X_MIN, X_MAX
-                                                            , Y_MIN, Y_MAX), cmap='viridis')
-    plt.colorbar(label='Maximum P(occupied)')
-    plt.title('Maximum Road Damage Occupancy Grid Map')
-    plt.xlabel('X [m]')
-    plt.ylabel('Y [m]')
-    plt.savefig('image/' + SCENARIO_NAME +  '/max_occupancy_grid_' + str(SIM_STEPS) +
-                '.png', dpi=300, bbox_inches='tight')
-    plt.show()
-
-    # visulize the filter
-
-
-
-
-
-    # visualize the filtered road anomaly map, in which the id of each road anomaly is visualized
-    plt.figure(figsize=(8, 8))
-    plt.imshow(filtered_prob_map, origin='lower', extent=(X_MIN, X_MAX,
-                                                            Y_MIN, Y_MAX), cmap='viridis')
-    plt.colorbar(label='Filtered P(occupied)')
-    # visualize the id of each road anomaly
-    for i, damage in enumerate(damage_list):
-        bounds = damage.shape.bounds
-        plt.gca().add_patch(plt.Rectangle((bounds[0], bounds[1]), bounds[2] - bounds[0], bounds[3] - bounds[1],
-                                           fill=False, edgecolor='red', linewidth=2, label=f'Damage {i+1}'))
-        plt.text((bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2, str(i+1), color='white',
-                 fontsize=12, ha='center', va='center')
-    plt.colorbar(label='Filtered P(occupied)')
-    plt.title('Filtered Road Damage Occupancy Grid Map')
-    plt.xlabel('X [m]')
-    plt.ylabel('Y [m]')
-    plt.savefig('image/' + SCENARIO_NAME +  '/filtered_occupancy_grid_' + str(SIM_STEPS) + '.png', dpi=300, bbox_inches='tight')
+    plt.savefig('image/' + SCENARIO_NAME +  '/max_probability_map_' + str(SIM_STEPS) + '.png', dpi=300, bbox_inches='tight')
     plt.show()
     plt.close()
+
+    # plot the filtered probability map
+    plt.figure(figsize=(8, 8))
+    plt.imshow(filtered_prob_map, origin='lower', extent=(X_MIN, X_MAX, Y_MIN, Y_MAX))
+    plt.colorbar(label='Filtered P(occupied)')
+    plt.title('Road Damage Filtered Probability Map (Final)')
+    plt.xlabel('X [m]')
+    plt.ylabel('Y [m]')
+    plt.savefig('image/' + SCENARIO_NAME +  '/filtered_probability_map_' + str(SIM_STEPS) + '.png', dpi=300, bbox_inches='tight')
+    plt.show()
+    plt.close()
+
+    # plot the clustered probability map and mark the region id based on the region_id_map. The region_id is put next to the cluster of road anomalies
+    # plt.figure(figsize=(8, 8))
+    # plt.imshow(clustered_prob_map, origin='lower', extent=(X_MIN, X_MAX, Y_MIN, Y_MAX))
+    # plt.colorbar(label='Clustered P(occupied)')
+    # plt.title('Road Damage Clustered Probability Map (Final)')
+    # plt.xlabel('X [m]')
+    # plt.ylabel('Y [m]')
+
+    # ploted_id = set()  # to keep track of the region ids that have been plotted
+    # for y in range(region_id_map.shape[0]):
+    #     for x in range(region_id_map.shape[1]):
+    #         if region_id_map[y, x] is not "na" and region_id_map[y, x] not in ploted_id:  # only plot the region id if it is greater than 0
+    #             plt.text(x * RESOLUTION + X_MIN, y * RESOLUTION + Y_MIN, str(region_id_map[y, x]), color='red', fontsize=8,
+    #                      ha='center', va='center')
+    #             ploted_id.add(region_id_map[y, x])
+
+
+
+    # plt.savefig('image/' + SCENARIO_NAME +  '/clustered_probability_map_' + str(SIM_STEPS) + '.png', dpi=300, bbox_inches='tight')
+    # plt.show()
+    # plt.close()
+
+    visualize_clustered_map(clustered_prob_map, filtered_prob_map_type, region_id_map, save_path="image/" + SCENARIO_NAME + '/clustered_probability_map_' + str(SIM_STEPS) + '.png',)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
