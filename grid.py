@@ -230,50 +230,32 @@ class OccupancyGrid:
             hull.append(hull[0])  # close polygon
         return hull
 
-    def _apply_hits_k_road_anomaly(self, hits_dict: dict) -> None:
-        """
-        Apply one batch of hits (per anomaly type) to self.log_odds, including decay & smoothing.
+    def _apply_hits_k_road_anomaly(self, hits_dict):
+        valid_dict = {t: ~np.isnan(self.log_odds_dict[t]) for t in self.sensor.anomaly_types}
 
-        Parameters:
-            hits_dict (dict): keys are anomaly types, values are binary arrays of hits.
-
-        """
-        # valid = ~np.isnan(self.log_odds)
-        valid_dict = {anomaly_type: ~np.isnan(self.log_odds_dict[anomaly_type]) for anomaly_type in self.sensor.anomaly_types}
-
-
-        # Initialize an increment array
-        # L_total = np.zeros_like(self.log_odds)
-        L_total_dict = {anomaly_type: np.zeros_like(self.log_odds_dict[anomaly_type]) for anomaly_type in self.sensor.anomaly_types}
-
-        # Loop through each anomaly type to accumulate increments
         for anomaly_type, hits in hits_dict.items():
-            probs = self.sensor.prob_dict[anomaly_type]
-
-            # Compute log-odds increment per anomaly type
-            # L_hit = np.log(probs['tp'] / probs['fa'])
-            L_hit = np.log(self.sensor.prob_dict[anomaly_type]['tp'] / self.sensor.prob_dict[anomaly_type]['fp'])
-
-            # Accumulate increments weighted by hits
             valid = valid_dict[anomaly_type]
-            L_total_dict[anomaly_type][valid] += hits[valid] * L_hit
+            L_hit = np.log(self.sensor.prob_dict[anomaly_type]['tp'] /
+                           self.sensor.prob_dict[anomaly_type]['fp'])
 
-            # 1) Apply accumulated increments
-            self.log_odds_dict[anomaly_type][valid] += L_total_dict[anomaly_type][valid]
+            # 1) Build a 2-D increment image
+            L_total = hits.astype(float) * L_hit
 
-            # 2) Apply decay towards prior
+            # 2) Smooth the INCREMENT in 2-D (not a masked 1-D vector)
+            L_total_sm = gaussian_filter(L_total, sigma=self.smoothing_sigma)
+
+            # 3) Apply increment only on valid (lane) cells
+            self.log_odds_dict[anomaly_type][valid] += L_total_sm[valid]
+
+            # 4) Decay toward prior on valid cells (unchanged)
             a = self.decay_rate
             if self.prior is None:
                 prior_log_odds = np.log(self.prior_mild_road / (1 - self.prior_mild_road))
-                self.log_odds_dict[anomaly_type][valid] = (1 - a) * self.log_odds_dict[anomaly_type][valid] + a * prior_log_odds
             else:
-                # here prior is an numpy array, so we need to compute the log-odds for each cell
                 prior_log_odds = np.log(self.prior / (1 - self.prior))
-                self.log_odds_dict[anomaly_type][valid] = (1 - a) * self.log_odds_dict[anomaly_type][valid] + a * prior_log_odds
-            # 3) Apply Gaussian smoothing
-            self.log_odds_dict[anomaly_type][valid] = gaussian_filter(
-            self.log_odds_dict[anomaly_type][valid],
-            sigma=self.smoothing_sigma)
+            self.log_odds_dict[anomaly_type][valid] = (
+                    (1 - a) * self.log_odds_dict[anomaly_type][valid] + a * prior_log_odds
+            )
 
     def batch_update(self, log_path: str, batch_size: int = 360):
         """
@@ -315,8 +297,8 @@ class OccupancyGrid:
         for anomaly_type, log_odds in self.log_odds_dict.items():
             prob_map = np.full_like(self.log_odds_dict[anomaly_type], np.nan)
             mask = ~np.isnan(self.log_odds_dict[anomaly_type])
-            prob_map[mask] = self._logodds_to_prob(self.log_odds_dict[anomaly_type][mask])
-            prob_map_dict[anomaly_type] = self._logodds_to_prob(log_odds)
+            prob_map[mask] = self._logodds_to_prob(log_odds[mask])
+            prob_map_dict[anomaly_type] = prob_map  # <- use masked version
 
         self.prob_map_dict = prob_map_dict
         return prob_map_dict

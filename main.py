@@ -34,19 +34,27 @@ SUMO_CMD = ['sumo', '-c', SUMOCFG_FILE, '--step-length', '1.0']
 DAMAGE_EDGE_IDS = ['-4001.0.00', '-4002.0.00', '-5004.0.00']
 # DAMAGE_EDGE_IDS = ['-4001.0.00', '-4002.0.00']
 
-BATCH_SIZE = 360  # number of detections to process in one batch
-RESOLUTION = 1.0  # resolution of the grid in meters
-PRIOR_MILD = 0.05  # prior probability of occupancy (assuming a mild road)
-MARGIN = 5.0  # margin distance for extending the occupancy grid map
-OVERLAP_STEPS = 20  # number of steps for the overlap during the generation of the grid, this fixes the gaps between
-# center line of connected edges
-GPS_SIGMA = 5.0  # GPS noise in meters
-DECAY_RATE = 0.1 # decay rate for the occupancy grid
-SMOOTHING_SIGMA = 1.0  # sigma for the gaussian smoothing
-SIM_STEPS = 3600  # number of simulation steps
-SPEED_THRESHOLD = 5 # speed threshold for detecting damage This also used in i
-PROB_THRESHOLD = 0.5
-NEIGHBOR_DEPTH = 5
+
+# Load parameters from config.json
+with open("config/brussel_rural/config.json", "r") as f:
+    params = json.load(f)
+
+# Access variables
+BATCH_SIZE = params["BATCH_SIZE"]
+RESOLUTION = params["RESOLUTION"]
+PRIOR_MILD = params["PRIOR_MILD"]
+MARGIN = params["MARGIN"]
+OVERLAP_STEPS = params["OVERLAP_STEPS"]
+GPS_SIGMA = params["GPS_SIGMA"]
+DECAY_RATE = params["DECAY_RATE"]
+SMOOTHING_SIGMA = params["SMOOTHING_SIGMA"]
+SIM_STEPS = params["SIM_STEPS"]
+SPEED_THRESHOLD = params["SPEED_THRESHOLD"]
+PROB_THRESHOLD = params["PROB_THRESHOLD"]
+NEIGHBOR_DEPTH = params["NEIGHBOR_DEPTH"]
+
+SIM_STEPS = 450 # overwriting sim steps
+print("Loaded parameters:", params)
 
 
 
@@ -241,6 +249,6 @@ def analyze(detection_file_name):
 
 
 if __name__ == "__main__":
-    # simulate()
+    simulate()
     analyze( detection_file_name = 'data/' + SCENARIO_NAME + '/detection_logs_' + str(SIM_STEPS) + '.txt')
 

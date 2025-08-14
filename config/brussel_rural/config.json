@@ -1,0 +1,14 @@
+{
+    "BATCH_SIZE": 360,
+    "RESOLUTION": 1.0,
+    "PRIOR_MILD": 0.05,
+    "MARGIN": 5.0,
+    "OVERLAP_STEPS": 20,
+    "GPS_SIGMA": 5.0,
+    "DECAY_RATE": 0.05,
+    "SMOOTHING_SIGMA": 1.0,
+    "SIM_STEPS": 1800,
+    "SPEED_THRESHOLD": 5,
+    "PROB_THRESHOLD": 0.5,
+    "NEIGHBOR_DEPTH": 5
+}
