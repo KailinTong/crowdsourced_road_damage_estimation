@@ -125,12 +125,12 @@ def analyze(detection_file_name):
     grid = OccupancyGrid(NET_FILE, sensor, RESOLUTION, None, PRIOR_MILD, MARGIN, OVERLAP_STEPS, DECAY_RATE, SMOOTHING_SIGMA, PROB_THRESHOLD, NEIGHBOR_DEPTH)
     X_MIN, X_MAX, Y_MIN, Y_MAX = grid.x_min, grid.x_max, grid.y_min, grid.y_max
 
-    grid.batch_update(detection_file_name,  batch_size=BATCH_SIZE)
-    probmap_dict = grid.gen_probability_map()
-    # filter results
     export_json_path = "data/" + SCENARIO_NAME + "/result_" + str(SIM_STEPS) + ".json"
-    max_prob_map, filtered_prob_map, filtered_prob_map_type, clustered_prob_map, clustered_type_map, region_id_map = grid.filter_results(average_neighbors=True, export_json_path=export_json_path)
 
+    prob_map_dict, max_prob_map, filtered_prob_map, filtered_prob_map_type, clustered_prob_map, clustered_type_map, region_id_map = grid.gen_probability_map(detection_file_name,
+                                                                                                                                                             batch_size=BATCH_SIZE,
+                                                                                                                                                             average_neighbors=True,
+                                                                                                                                                             export_json_path=export_json_path)
 
     # load the damage_model.txt
     damage_list = RoadDamage.read('data/' + SCENARIO_NAME + '/damage_model.json')
@@ -158,9 +158,9 @@ def analyze(detection_file_name):
     for anomaly_type in sensor.anomaly_types:
         # why is probmap empty
         # show the maximum probability of the probmap which is not nan
-        probmap = probmap_dict[anomaly_type]
+        probmap = prob_map_dict[anomaly_type]
         probmap = np.nan_to_num(probmap, nan=0.0)  # replace NaN with 0
-        print("Max probability in probmap for {} is: {}".format(anomaly_type, np.max(probmap_dict[anomaly_type])) )
+        print("Max probability in probmap for {} is: {}".format(anomaly_type, np.max(prob_map_dict[anomaly_type])) )
 
         plt.figure(figsize=(8, 8))
         plt.imshow(probmap, origin='lower', extent=(X_MIN, X_MAX, Y_MIN, Y_MAX))
@@ -249,6 +249,6 @@ def analyze(detection_file_name):
 
 
 if __name__ == "__main__":
-    simulate()
+    # simulate()
     analyze( detection_file_name = 'data/' + SCENARIO_NAME + '/detection_logs_' + str(SIM_STEPS) + '.txt')
 

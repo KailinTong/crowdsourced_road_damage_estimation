@@ -292,7 +292,10 @@ class OccupancyGrid:
         if any(np.any(hits) for hits in hits_dict.values()):
             self._apply_hits_k_road_anomaly(hits_dict)
 
-    def gen_probability_map(self):
+    def gen_probability_map(self, detection_file_name, batch_size, average_neighbors=True, export_json_path=None):
+
+        self.batch_update(detection_file_name, batch_size)
+
         prob_map_dict = {}
         for anomaly_type, log_odds in self.log_odds_dict.items():
             prob_map = np.full_like(self.log_odds_dict[anomaly_type], np.nan)
@@ -301,7 +304,11 @@ class OccupancyGrid:
             prob_map_dict[anomaly_type] = prob_map  # <- use masked version
 
         self.prob_map_dict = prob_map_dict
-        return prob_map_dict
+
+        max_prob_map, filtered_prob_map, filtered_prob_map_type, clustered_prob_map, clustered_type_map, region_id_map = self.filter_results(
+            average_neighbors=average_neighbors, export_json_path=export_json_path)
+
+        return prob_map_dict, max_prob_map, filtered_prob_map, filtered_prob_map_type, clustered_prob_map, clustered_type_map, region_id_map
 
     @staticmethod
     def cluster_by_type_keep_nan(
