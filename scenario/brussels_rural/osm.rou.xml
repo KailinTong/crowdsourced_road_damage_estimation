@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<routes
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+
+    <!-- vehicle type definition -->
+    <vType id="PasVeh" vClass="passenger"/>
+
+    <!-- flows connecting right-top road and bottom road, two directions -->
+    <flow id="rt_to_bottom" type="PasVeh"
+          begin="0.00"    end="7200"
+          vehsPerHour="3600"
+          departLane="best" departSpeed="max"
+          from="62324046" to="-33288234#0"/>
+    <flow id="bottom_to_rt" type="PasVeh"
+          begin="0.00"    end="7200"
+          vehsPerHour="3600"
+          departLane="best" departSpeed="max"
+          from="-33288234#0" to="62324046"/>
+
+</routes>
