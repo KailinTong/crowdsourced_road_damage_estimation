@@ -9,18 +9,23 @@ from matplotlib import cm
 from sensor import VehicleSensor
 from collections import deque
 import json
-from shapely.geometry import Polygon, MultiPolygon
+from shapely.geometry import Polygon, MultiPolygon, Point
 from shapely.ops import unary_union
 from shapely.affinity import translate
 
 class OccupancyGrid:
-    def __init__(self, net_file, sensor, resolution=1.0, prior=None, prior_mild_road=0.05, margin=5.0, overlap_steps=20, decay_rate=0.1, smoothing_sigma=1.0, prob_threshold = 0.5, neighbor_depth=2):
+    def __init__(self, net_file, sensor, resolution=1.0, prior=None, prior_mild_road=0.05, margin=5.0, overlap_steps=20, decay_rate=0.1, smoothing_sigma=1.0, prob_threshold = 0.5, neighbor_depth=2, risk_regions=None, risk_prior_by_level=None, default_risk_level: int = 0):
         """
         Initialize the OccupancyGrid with the given parameters.
         :param net_file: network file containing lane shapes
         :param sensor: sensor object containing road anomaly probabilities
         :param resolution: resolution of the grid in meters
         :param prior: prior probability of occupancy. This is a numpy array where each cell is the prior probability of occupancy.
+        :param risk_regions: optional list of geolocated InSAR risk zones. Each element can be either a shapely geometry
+            or a dict with keys {"geometry", "risk_level"|"risk"}. The geometry is expected in world coordinates.
+        :param risk_prior_by_level: mapping from integer risk level to prior anomaly probability. Levels not present fall back
+            to the closest lower level or the baseline prior.
+        :param default_risk_level: level used when a provided region is missing risk metadata.
         :param margin: margin distance for extending the occupancy grid map
         :param overlap_steps: overlap steps for generating the grid, this fixes the gaps between
         :param decay_rate: decay rate for the occupancy grid, how much the log-odds will decay towards the prior
@@ -54,7 +59,73 @@ class OccupancyGrid:
         # Initialize the log-odds dictionary, the key is the road anomaly types. and it will hold the log-odds values for each grid cell, the key
         self.log_odds_dict = {anomaly_type: np.full((self.height, self.width), np.nan) for anomaly_type in self.sensor.anomaly_types}
         # self.log_odds = np.full((self.height, self.width), np.nan)
+        self.prior_grid = self._build_prior_grid(risk_regions, risk_prior_by_level, default_risk_level)
         self._parse_and_draw_lanes(net_file, p_z=prior_mild_road)
+
+    def _build_prior_grid(self, risk_regions, risk_prior_by_level, default_risk_level):
+        """Build a per-cell prior map using InSAR risk regions when provided."""
+        base_prior = self.prior_mild_road if self.prior is None else self.prior
+        try:
+            prior_grid = np.full((self.height, self.width), float(base_prior))
+        except Exception:
+            prior_grid = np.array(base_prior, dtype=float)
+            if prior_grid.shape != (self.height, self.width):
+                prior_grid = np.full((self.height, self.width), float(self.prior_mild_road))
+
+        if risk_prior_by_level is None:
+            risk_prior_by_level = {
+                0: float(self.prior_mild_road),  # no detected risk: use baseline small prior
+                1: max(float(self.prior_mild_road), 0.1),
+                2: max(float(self.prior_mild_road), 0.2),
+                3: max(float(self.prior_mild_road), 0.35),
+                4: max(float(self.prior_mild_road), 0.5),
+            }
+
+        if not risk_regions:
+            return prior_grid
+
+        def risk_value_to_level(value):
+            # Convert continuous mm/year values (as shown in the InSAR report) into discrete risk levels.
+            if value is None:
+                return default_risk_level
+            if value < 0.5:
+                return 0
+            if value < 2.0:
+                return 1
+            if value < 3.5:
+                return 2
+            if value < 5.0:
+                return 3
+            return 4
+
+        for region in risk_regions:
+            if isinstance(region, dict):
+                geom = region.get("geometry")
+                risk_value = region.get("risk_level", region.get("risk"))
+            else:
+                geom = region
+                risk_value = None
+
+            if geom is None:
+                continue
+
+            level = region.get("level", default_risk_level) if isinstance(region, dict) else default_risk_level
+            level = risk_value_to_level(risk_value) if risk_value is not None else level
+            prior_value = risk_prior_by_level.get(level, risk_prior_by_level.get(default_risk_level, float(self.prior_mild_road)))
+
+            minx, miny, maxx, maxy = geom.bounds
+            i_min = max(int((miny - self.y_min) / self.resolution), 0)
+            i_max = min(int(np.ceil((maxy - self.y_min) / self.resolution)), self.height)
+            j_min = max(int((minx - self.x_min) / self.resolution), 0)
+            j_max = min(int(np.ceil((maxx - self.x_min) / self.resolution)), self.width)
+
+            for i in range(i_min, i_max):
+                for j in range(j_min, j_max):
+                    cx, cy = self.grid_to_world(i, j)
+                    if geom.contains(Point(cx, cy)) or geom.touches(Point(cx, cy)):
+                        prior_grid[i, j] = prior_value
+
+        return prior_grid
 
     def _compute_bounds(self, net_file, margin):
 
@@ -117,6 +188,12 @@ class OccupancyGrid:
                 for p0, p1 in zip(shape_pts[:-1], shape_pts[1:]):
                     self._draw_lane_segment(p0, p1, width, p_z)
 
+    def _get_prior_for_cell(self, i: int, j: int, fallback: float) -> float:
+        """Return the risk-aware prior for a given grid index."""
+        if self.prior_grid is not None and 0 <= i < self.height and 0 <= j < self.width:
+            return float(self.prior_grid[i, j])
+        return float(fallback)
+
     def _draw_lane_segment(self, p0, p1, width, p_z):
         x0, y0 = p0[:2]
         x1, y1 = p1[:2]
@@ -132,9 +209,6 @@ class OccupancyGrid:
 
         # how many grid cells across the half‐width (rounded up)
         half_w_cells = int(np.ceil(half_w / self.resolution))
-
-        # convert probability to log-odds once
-        l_z = self._prob_to_logodds(p_z)
 
         # -- along-segment sampling setup --
         base_steps = int(np.ceil(seg_len / self.resolution))  # #steps to cover the length
@@ -165,6 +239,8 @@ class OccupancyGrid:
                     i, j = i0 + di, j0 + dj
                     if not (0 <= i < self.height and 0 <= j < self.width):
                         continue
+                    prior_prob = self._get_prior_for_cell(i, j, p_z)
+                    l_z = self._prob_to_logodds(prior_prob)
                     for anomaly_type in self.sensor.anomaly_types:
                         # update the log-odds for this cell
                         if np.isnan(self.log_odds_dict[anomaly_type][i, j]):
@@ -249,13 +325,20 @@ class OccupancyGrid:
 
             # 4) Decay toward prior on valid cells (unchanged)
             a = self.decay_rate
-            if self.prior is None:
-                prior_log_odds = np.log(self.prior_mild_road / (1 - self.prior_mild_road))
+            if self.prior_grid is not None:
+                prior_log_odds = np.full_like(self.log_odds_dict[anomaly_type], np.nan, dtype=float)
+                prior_log_odds[valid] = self._prob_to_logodds(self.prior_grid[valid])
+                self.log_odds_dict[anomaly_type][valid] = (
+                    (1 - a) * self.log_odds_dict[anomaly_type][valid] + a * prior_log_odds[valid]
+                )
             else:
-                prior_log_odds = np.log(self.prior / (1 - self.prior))
-            self.log_odds_dict[anomaly_type][valid] = (
-                    (1 - a) * self.log_odds_dict[anomaly_type][valid] + a * prior_log_odds
-            )
+                if self.prior is None:
+                    prior_log_odds = np.log(self.prior_mild_road / (1 - self.prior_mild_road))
+                else:
+                    prior_log_odds = np.log(self.prior / (1 - self.prior))
+                self.log_odds_dict[anomaly_type][valid] = (
+                        (1 - a) * self.log_odds_dict[anomaly_type][valid] + a * prior_log_odds
+                )
 
     def batch_update(self, log_path: str, batch_size: int = 360):
         """
@@ -537,6 +620,7 @@ class OccupancyGrid:
 
     @staticmethod
     def _prob_to_logodds(p):
+        p = np.clip(p, 1e-6, 1 - 1e-6)
         return np.log(p / (1.0 - p))
 
     @staticmethod

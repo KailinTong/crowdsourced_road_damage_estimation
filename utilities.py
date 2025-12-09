@@ -1,6 +1,7 @@
-from typing import Dict
+from typing import Dict, List
 import json
 from shapely.wkt import loads as load_wkt
+from shapely.geometry import shape
 
 # laod the probability dictionary from the json file
 def load_road_anomaly_metrics(path: str = "data/road_anomaly_metrics.json") -> Dict[str, Dict[str, float]]:
@@ -24,6 +25,42 @@ def load_road_anomaly_metrics(path: str = "data/road_anomaly_metrics.json") -> D
         raise ValueError(f"Error parsing JSON metrics file: {e}")
 
     return data
+
+
+def load_insar_risk_regions(geojson_path: str, risk_property: str = "risk_level") -> List[dict]:
+    """
+    Load InSAR-derived risk regions from a GeoJSON file.
+
+    Each feature must have a valid geometry. Risk intensity is read from the
+    specified property if present; otherwise, regions default to level 0.
+
+    Returns:
+        List[dict]: [{"geometry": shapely geometry, "risk_level": value, "level": value}]
+    """
+    with open(geojson_path, "r") as f:
+        data = json.load(f)
+
+    regions = []
+    for feature in data.get("features", []):
+        geom_data = feature.get("geometry") or feature.get("Geometry")
+        if geom_data is None:
+            continue
+        try:
+            geom = shape(geom_data)
+        except Exception:
+            continue
+
+        props = feature.get("properties", {}) or {}
+        risk_value = props.get(risk_property)
+        level = props.get("level", props.get("risk_class"))
+
+        regions.append({
+            "geometry": geom,
+            "risk_level": risk_value,
+            "level": level if level is not None else 0,
+        })
+
+    return regions
 
 def gen_damage_area(damage_list, X_MIN, X_MAX, Y_MIN, Y_MAX, RESOLUTION, plot_margin=20):
 
