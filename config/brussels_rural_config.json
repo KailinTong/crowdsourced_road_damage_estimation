@@ -11,12 +11,12 @@
     "SPEED_THRESHOLD": 5,
     "PROB_THRESHOLD": 0.5,
     "NEIGHBOR_DEPTH": 5,
-    "SCENARIO_NAME": "brussel_rural",
-    "NET_FILE":"scenario/brussel_rural/osm_withProjParam.net.xml",
-    "SUMOCFG_FILE" : "scenario/brussel_rural/osm.sumocfg",
-    "ROUTE_FILE": "scenario/brussel_rural/osm.rou.xml",
-    "ADDITIONAL_FILE": "scenario/brussel_rural/potholes.add.xml",
-    "PROBABILITY_FILE": "data/brussel_rural/road_anomaly_probabilities.json",
+    "SCENARIO_NAME": "brussels_rural",
+    "NET_FILE":"scenario/brussels_rural/osm_withProjParam.net.xml",
+    "SUMOCFG_FILE" : "scenario/brussels_rural/osm.sumocfg",
+    "ROUTE_FILE": "scenario/brussels_rural/osm.rou.xml",
+    "ADDITIONAL_FILE": "scenario/brussels_rural/potholes.add.xml",
+    "PROBABILITY_FILE": "data/brussels_rural/road_anomaly_probabilities.json",
     "ROAD_ANOMALY_DETECTION_FILE": "data/road_anomaly_metrics.json",
     "DAMAGE_EDGE_IDS":[]
     

@@ -4,7 +4,7 @@
 
 ## Getting started
 
-# Conda Environment
+### Conda Environment
 
 Go to your repository:
 
@@ -22,21 +22,14 @@ To use the environment later:
 
 `conda activate crowdsourced_road_damage_estimation`
 
-## TODOs
-Here are TODOs for the project:
--  A model of hitting the road damage with a car according to the geometry of the road damage, pothole...
--  Extending the probability of detection, false alarms, and mapped from (low, medium, high) to different probabilities
--  Improving the detection of raod damage with a car
-- currently it is detected per time steps, and there is a chance that the cars drives over the region of raod damage but no detection
-here is the code for detection:
-`def contains(self, x: float, y: float) -> bool:
-        """
-        Check if the point (x, y) falls within this damage's shape.
-        """
-        return self.shape.contains(Point(x, y))`
+### Start Simulation
 
-`            detection = sensor_model.detect_damage_position(step, x, y)
-`
+ `python main.py -c brussels_rural_config.json -m simulate`
+
+### Start Analyze
+
+ `python main.py -c brussels_rural_config.json -m analyze`
+
 
 ## Research questions
 - the influence of road damage geometry on the detection of road damage and generation of the map (single lane road)

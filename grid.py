@@ -3,7 +3,6 @@ import xml.etree.ElementTree as ET
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter
 from utilities import load_road_anomaly_metrics
-from road_anomaly_collision_model import NET_FILE, SCENARIO_NAME
 from scipy.ndimage import label, measurements
 from matplotlib import cm
 from sensor import VehicleSensor

@@ -11,57 +11,11 @@ from road_damage import RoadDamage
 from typing import Dict, List
 from utilities import load_road_anomaly_metrics, gen_damage_area, visualize_clustered_map, compare_anomaly_results
 import traci
+import argparse
+import json
+import os
+from pathlib import Path
 
-# --- USER CONFIG ---
-# NET_FILE = 'scenario/Graz_A2/A2_GO2GW_v2_MM.net.xml'
-# ROUTE_FILE = 'scenario/Graz_A2/A2Graz.rou.xml'
-# ADDITIONAL_FILE = 'scenario/Graz_A2/road_damage.add.xml'
-# PROBABILITY_FILE = 'scenario/Graz_A2/road_anomaly_probabilities.json'
-
-SCENARIO_NAME = 'brussel_rural'
-NET_FILE = 'scenario/brussel_rural/osm_withProjParam.net.xml'
-SUMOCFG_FILE = 'scenario/brussel_rural/osm.sumocfg'
-ROUTE_FILE = 'scenario/brussel_rural/osm.rou.xml'
-ADDITIONAL_FILE = 'scenario/brussel_rural/potholes.add.xml'
-PROBABILITY_FILE = 'data/brussel_rural/road_anomaly_probabilities.json'
-ROAD_ANOMALY_DETECTION_FILE = 'data/road_anomaly_metrics.json'
-
-
-# SUMO_CMD = ['sumo', '-n', NET_FILE, '-r', ROUTE_FILE, '-a', ADDITIONAL_FILE, '--step-length', '1.0']
-# SUMO_CMD = ['sumo-gui', '-c', SUMOCFG_FILE ,'--step-length', '1.0']
-SUMO_CMD = ['sumo', '-c', SUMOCFG_FILE, '--step-length', '1.0']
-
-DAMAGE_EDGE_IDS = ['-4001.0.00', '-4002.0.00', '-5004.0.00']
-# DAMAGE_EDGE_IDS = ['-4001.0.00', '-4002.0.00']
-
-
-# Load parameters from config.json
-with open("config/brussel_rural/config.json", "r") as f:
-    params = json.load(f)
-
-# Access variables
-BATCH_SIZE = params["BATCH_SIZE"]
-RESOLUTION = params["RESOLUTION"]
-PRIOR_MILD = params["PRIOR_MILD"]
-MARGIN = params["MARGIN"]
-OVERLAP_STEPS = params["OVERLAP_STEPS"]
-GPS_SIGMA = params["GPS_SIGMA"]
-DECAY_RATE = params["DECAY_RATE"]
-SMOOTHING_SIGMA = params["SMOOTHING_SIGMA"]
-SIM_STEPS = params["SIM_STEPS"]
-SPEED_THRESHOLD = params["SPEED_THRESHOLD"]
-PROB_THRESHOLD = params["PROB_THRESHOLD"]
-NEIGHBOR_DEPTH = params["NEIGHBOR_DEPTH"]
-
-SIM_STEPS = 450 # overwriting sim steps
-print("Loaded parameters:", params)
-
-
-
-PROB_DICT = load_road_anomaly_metrics(ROAD_ANOMALY_DETECTION_FILE)
-
-
-# -------------------
 
 def simulate():
     damage_model = RoadDamage(NET_FILE, DAMAGE_EDGE_IDS, radius=3.0, damage_file=ADDITIONAL_FILE, probability_file=PROBABILITY_FILE)
@@ -241,14 +195,91 @@ def analyze(detection_file_name):
 
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run SUMO simulation with a given scenario configuration."
+    )
+    parser.add_argument(
+        "--config_file",
+        "-c",
+        default="config/brussels_rural_config.json",
+        help=(
+            "Path to the JSON config file. "
+            "If only a filename is given, it is assumed to be in the 'config/' folder.\n"
+            "Example: --config_file brussels_rural_config.json"
+        ),
+    )
 
+    parser.add_argument(
+        "--mode",
+        "-m",
+        choices=["simulate", "analyze", "both"],
+        default="both",
+        help=(
+            "Choose what to run:\n"
+            "'simulate' – only run the SUMO simulation\n"
+            "'analyze' – only run the analysis step\n"
+            "'both' – run simulation followed by analysis (default)"
+        ),
+    )
 
-
-
-
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    # simulate()
-    analyze( detection_file_name = 'data/' + SCENARIO_NAME + '/detection_logs_' + str(SIM_STEPS) + '.txt')
+    args = parse_args()
+
+    # Resolve config path:
+    # - if user passes just a filename, use config/<filename>
+    # - if they pass a full/relative path, use as is
+    if os.path.dirname(args.config_file):
+        config_path = Path(args.config_file)
+    else:
+        config_path = Path("config") / args.config_file
+
+    if not config_path.is_file():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    with config_path.open("r") as f:
+        params = json.load(f)
+
+    print(f"Loaded parameters from {config_path}:")
+    print(params)
+
+
+    # Access variables
+    SCENARIO_NAME = params["SCENARIO_NAME"]
+    NET_FILE = params["NET_FILE"]
+    ADDITIONAL_FILE = params["ADDITIONAL_FILE"]
+    PROBABILITY_FILE = params["PROBABILITY_FILE"]
+    ROAD_ANOMALY_DETECTION_FILE = params["ROAD_ANOMALY_DETECTION_FILE"]
+    SUMOCFG_FILE = params["SUMOCFG_FILE"]
+    ROUTE_FILE = params["ROUTE_FILE"]
+    DAMAGE_EDGE_IDS = params["DAMAGE_EDGE_IDS"]
+
+    SUMO_CMD = ["sumo", "-c", SUMOCFG_FILE, "--step-length", "1.0"]
+
+    BATCH_SIZE = params["BATCH_SIZE"]
+    RESOLUTION = params["RESOLUTION"]
+    PRIOR_MILD = params["PRIOR_MILD"]
+    MARGIN = params["MARGIN"]
+    OVERLAP_STEPS = params["OVERLAP_STEPS"]
+    GPS_SIGMA = params["GPS_SIGMA"]
+    DECAY_RATE = params["DECAY_RATE"]
+    SMOOTHING_SIGMA = params["SMOOTHING_SIGMA"]
+    SIM_STEPS = params["SIM_STEPS"]
+    SPEED_THRESHOLD = params["SPEED_THRESHOLD"]
+    PROB_THRESHOLD = params["PROB_THRESHOLD"]
+    NEIGHBOR_DEPTH = params["NEIGHBOR_DEPTH"]
+
+    # Load anomaly metrics
+    PROB_DICT = load_road_anomaly_metrics(ROAD_ANOMALY_DETECTION_FILE)
+
+    if args.mode in ["simulate", "both"]:
+        simulate()
+
+    if args.mode in ["analyze", "both"]:
+        detection_file = Path("data") / SCENARIO_NAME / f"detection_logs_{SIM_STEPS}.txt"
+        analyze(detection_file_name=str(detection_file))
+
 
