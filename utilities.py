@@ -96,6 +96,9 @@ def gen_damage_area(damage_list, X_MIN, X_MAX, Y_MIN, Y_MAX, RESOLUTION, plot_ma
 
 
 import numpy as np
+import matplotlib
+# Use a non-interactive backend to avoid display errors during simulation if needed
+# matplotlib.use('Agg') 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.patheffects as pe
@@ -119,6 +122,9 @@ def visualize_clustered_map(
     max_labels: int | None = None,
     label_x_offset: float = 3.0
 ):
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    import matplotlib.patheffects as pe
     if anomaly_colors is None:
         # Up to 6 fixed anomaly colors (RGB tuples)
         anomaly_colors = [
@@ -242,6 +248,7 @@ def compare_anomaly_results(gt_json_path: str, det_json_path: str, save_path: st
     Returns:
         dict: KPIs and match list.
     """
+    import matplotlib.pyplot as plt
     # Load JSON files
     with open(gt_json_path, "r") as f:
         gt_data = json.load(f)

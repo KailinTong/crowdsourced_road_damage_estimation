@@ -33,40 +33,43 @@ def simulate():
 
     detections = []
     veh_pos_last = {}
-    for step in range(SIM_STEPS):
-        sumo.step()
-        damage_detected = False
-        for vid, (x, y) in sumo.get_vehicle_positions().items():
-            if sumo.get_vehicle_type(vid) != 'PasVeh':
-                continue
-            # filter the vehilcles wiht low speed
-            if traci.vehicle.getSpeed(vid) < SPEED_THRESHOLD:
-                continue
-            if vid not in veh_pos_last:
-                veh_pos_last[vid] = (x, y)
-            else:
-                # Use the last true position of the vehicle
-                last_x, last_y = veh_pos_last[vid]
-                veh_pos_last[vid] = (x, y)  # Update the last position
-                detection = sensor_model.detect_damage_travel_position(step, last_x, last_y, x, y)
-                if detection.detected:
-                    print(f"[step {step}] Vehicle {vid} detected damage at ({detection.x:.2f}, {detection.y:.2f}) with "
-                      f"type '{detection.type}' evaluated as {detection.eval}")
-                    detections.append(detection)
-                    damage_detected = True
-            veh_pos_last[vid] = (x, y)  # Store the last true position of the vehicle
-        if not damage_detected:
-            detections.append(Detection(0, 0, step, False, "na"))
+    try:
+        for step in range(SIM_STEPS):
+            sumo.step()
+            damage_detected = False
+            for vid, (x, y) in sumo.get_vehicle_positions().items():
+                if sumo.get_vehicle_type(vid) != 'PasVeh':
+                    continue
+                # filter the vehilcles wiht low speed
+                if traci.vehicle.getSpeed(vid) < SPEED_THRESHOLD:
+                    continue
+                if vid not in veh_pos_last:
+                    veh_pos_last[vid] = (x, y)
+                else:
+                    # Use the last true position of the vehicle
+                    last_x, last_y = veh_pos_last[vid]
+                    veh_pos_last[vid] = (x, y)  # Update the last position
+                    detection = sensor_model.detect_damage_travel_position(step, last_x, last_y, x, y)
+                    if detection.detected:
+                        print(f"[step {step}] Vehicle {vid} detected damage at ({detection.x:.2f}, {detection.y:.2f}) with "
+                          f"type '{detection.type}' evaluated as {detection.eval}")
+                        detections.append(detection)
+                        damage_detected = True
+                veh_pos_last[vid] = (x, y)  # Store the last true position of the vehicle
+            if not damage_detected:
+                detections.append(Detection(0, 0, step, False, "na"))
+    finally:
+        detection_file_name = 'data/' + SCENARIO_NAME + '/detection_logs_' + str(SIM_STEPS) + '.txt'
+        with open(detection_file_name, 'w') as f:
+            for d in detections:
+                f.write(f"{d.step} {d.x} {d.y} {d.detected} {d.type} {d.eval}\n")
 
-    detection_file_name = 'data/' + SCENARIO_NAME + '/detection_logs_' + str(SIM_STEPS) + '.txt'
-    with open(detection_file_name, 'w') as f:
-        for d in detections:
-            f.write(f"{d.step} {d.x} {d.y} {d.detected} {d.type} {d.eval}\n")
-
-    sumo.close()
+        sumo.close()
 
 
 def analyze(detection_file_name):
+    import matplotlib.pyplot as plt
+    from grid import OccupancyGrid
     # Create a copy of the default colormap and set the 'bad' (NaN) color
 
     with open(detection_file_name, 'r') as f:
@@ -76,7 +79,39 @@ def analyze(detection_file_name):
             detections.append(Detection(float(x), float(y), int(step), detected == 'True', road_anomaly_type, evaluation))
 
     sensor = VehicleSensor(PROB_DICT, GPS_SIGMA, None)
-    grid = OccupancyGrid(NET_FILE, sensor, RESOLUTION, None, PRIOR_MILD, MARGIN, OVERLAP_STEPS, DECAY_RATE, SMOOTHING_SIGMA, PROB_THRESHOLD, NEIGHBOR_DEPTH)
+
+    # Load risk regions from PROBABILITY_FILE if available
+    risk_regions = []
+    risk_prior_by_level = {}
+    try:
+        import json
+        from shapely.wkt import loads as load_wkt
+        with open(PROBABILITY_FILE, 'r') as f:
+            prob_data = json.load(f)
+        
+        # Determine unique probability levels
+        unique_probs = sorted(list(set(item['probabilities']['vehicle'] for item in prob_data.values())))
+        # value -> integer level
+        prob_to_level = {p: i for i, p in enumerate(unique_probs)}
+        # integer level -> value (for OccupancyGrid)
+        risk_prior_by_level = {i: p for p, i in prob_to_level.items()}
+
+        print(f"Loaded {len(prob_data)} risk zones. Risk Levels: {risk_prior_by_level}")
+
+        for item in prob_data.values():
+            poly = load_wkt(item['polygon'])
+            prob = item['probabilities']['vehicle']
+            level = prob_to_level[prob]
+            risk_regions.append({'geometry': poly, 'level': level})
+
+    except Exception as e:
+        print(f"Warning: Could not load risk regions for OccupancyGrid: {e}")
+        risk_regions = None
+        risk_prior_by_level = None
+
+    grid = OccupancyGrid(NET_FILE, sensor, RESOLUTION, None, PRIOR_MILD, MARGIN, OVERLAP_STEPS, DECAY_RATE, SMOOTHING_SIGMA, PROB_THRESHOLD, NEIGHBOR_DEPTH, 
+                         risk_regions=risk_regions, 
+                         risk_prior_by_level=risk_prior_by_level)
     X_MIN, X_MAX, Y_MIN, Y_MAX = grid.x_min, grid.x_max, grid.y_min, grid.y_max
 
     export_json_path = "data/" + SCENARIO_NAME + "/result_" + str(SIM_STEPS) + ".json"
@@ -223,11 +258,13 @@ def parse_args() -> argparse.Namespace:
         ),
     )
 
-    return parser.parse_args()
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Run with SUMO GUI instead of headless.",
+    )
 
-
-if __name__ == "__main__":
-    args = parse_args()
+    args = parser.parse_args()
 
     # Resolve config path:
     # - if user passes just a filename, use config/<filename>
@@ -257,7 +294,8 @@ if __name__ == "__main__":
     ROUTE_FILE = params["ROUTE_FILE"]
     DAMAGE_EDGE_IDS = params["DAMAGE_EDGE_IDS"]
 
-    SUMO_CMD = ["sumo", "-c", SUMOCFG_FILE, "--step-length", "1.0"]
+    sumo_binary = "sumo-gui" if args.gui else "sumo"
+    SUMO_CMD = [sumo_binary, "-c", SUMOCFG_FILE, "--step-length", "1.0"]
 
     BATCH_SIZE = params["BATCH_SIZE"]
     RESOLUTION = params["RESOLUTION"]
