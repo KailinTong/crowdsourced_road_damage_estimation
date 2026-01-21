@@ -8,11 +8,13 @@ import sys
 # Configurations to test
 # Format: (Config Name, SIM_STEPS override)
 EXPERIMENTS = [
-    # Scenario 1: Graz A2 (30 steps for speed test)
+    # Scenario 1: Brussels Rural (using default or override)
+    ("config/brussels_rural_config.json", 30),
+    
+    # Scenario 2: Graz A2 (30 steps for speed test)
     ("config/Graz_A2_config.json", 30),
     
-    # Scenario 2: Brussels Rural (using default or override)
-    ("config/brussels_rural_config.json", 30),
+
     
     # You can add more variations here, e.g. different SIM_STEPS
     # ("config/Graz_A2_config.json", 1800),
