@@ -1,1 +1,3 @@
 /data/Graz_A2-Highway_electronic-file-repository
+*.pyc
+__pycache__/
