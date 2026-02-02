@@ -214,10 +214,10 @@ def visualize_clustered_map(prob_grid, type_grid, id_grid, output_path, x_min, x
         patches.Patch(color=COLORS['pothole_m'], label='Medium Severity (25-50mm dev., p=0.6)'),
         patches.Patch(color=COLORS['pothole_l'], label='Low Severity (13-25mm dev., p=0.6)'),
     ]
-    ax.legend(handles=legend_patches, loc='center left', bbox_to_anchor=(1.02, 0.5),
-              framealpha=0.9, title='Risk Level')
+    ax.legend(handles=legend_patches, loc='best', bbox_to_anchor=(1.02, 0.5),
+              framealpha=0.9)
     
-    ax.set_title(f'Clustered Probability Map (Uniform Prior p={PRIOR_UNIFORM})')
+    ax.set_title(f'Prior Probability Map')
     ax.set_xticks([])
     ax.set_yticks([])
     
