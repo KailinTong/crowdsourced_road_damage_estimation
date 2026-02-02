@@ -3,6 +3,7 @@
     <input>
         <net-file value="A2_GO2GW_v2_MM.net.xml"/>
         <route-files value="A2Graz.rou.xml"/>
+        <additional-files value="risk_zones.add.xml"/>
     </input>
     <time>
         <begin value="0"/>

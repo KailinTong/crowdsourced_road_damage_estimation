@@ -1,68 +1,60 @@
-# crowdsourced_road_damage_estimation
+# Crowdsourced Road Damage Estimation
 
+Estimation of road damage (potholes) using Bayesian fusion of crowdsourced vehicle sensor data and InSAR satellite priors.
 
+## 🚀 Getting Started
 
-## Getting started
+### 1. Environment Setup
+Activate the conda environment:
+```bash
+conda activate crowdsourced_road_damage_estimation
+```
 
-### Conda Environment
+## 🔬 Research Questions
+- How does road damage **geometry** influence detection and map generation (e.g., single-lane vs. multi-lane)?
+- How does the **prior probability** influence the convergence of the algorithm?
+- How does the **simulation time** influence the final result?
+- How does the **decay rate** influence the prediction result?
+- Does the **lane location** (left, right, middle) of the damage impact the mapping accuracy?
+- What is the minimum **vehicle density** (count and percentage) required for reliable detection?
 
-Go to your repository:
+## 🧪 Running Simulations (Manual Execution)
 
-`cd crowdsourced_road_damage_estimation/env`
+The project supports multiple scenarios. You can run them manually using the `--config` and `--mode` flags.
 
-Create the environment with Conda:
+### Graz A2 Scenario
+This scenario uses InSAR satellite priors mapped to scientific standards ([**ASTM D6433**](https://www.astm.org/d6433-23.html)). It uses millimeter-scale satellite displacement data to classify pothole severity (High >50mm, Medium 25-50mm, Low <25mm).
+- **Simulate:** `python3 main.py --config config/Graz_A2_config.json --mode simulate`
+- **Analyze:** `python3 main.py --config config/Graz_A2_config.json --mode analyze`
 
-`conda env create -n crowdsourced_road_damage_estimation -f environment.yml`
+### Brussels Rural Scenario
+- **Simulate:** `python3 main.py --config brussels_rural_config.json --mode simulate`
+- **Analyze:** `python3 main.py --config brussels_rural_config.json --mode analyze`
 
-After successful installation, activate the environment with:
+*Add `--gui` to any simulation command to watch the vehicles in real-time.*
 
-`conda activate crowdsourced_road_damage_estimation`
+## 📈 Batch Experiments
+To run automated simulations and analysis for both scenarios in sequence:
+```bash
+python3 run_experiments.py
+```
 
-To use the environment later:
+## 🛰 Experimental Data (Graz A2 "Story")
+The Graz A2 scenario features a specialized pipeline connecting satellite measurements to simulation priors:
 
-`conda activate crowdsourced_road_damage_estimation`
+- **Verified Mapping Logic ([ASTM D6433](https://www.astm.org/d6433-23.html)):**
+  This scenario utilizes InSAR data from Graz (mm/year) to estimate pothole depth over a **5-year cumulative period**. The estimated cumulative displacement is mapped directly to the **ASTM D6433** scientific standard for pothole severity. To ensure data quality, we apply a **13mm minimum depth filter** (the ASTM threshold for 'Low' severity); anything shallower is considered surface noise and excluded:
+    - **High Severity:** > 50mm estimated depth (Red)
+    - **Medium Severity:** 25-50mm estimated depth (Orange)
+    - **Low Severity:** 13-25mm estimated depth (Yellow)
+    - *Note: < 13mm zones are filtered as non-potholes.*
+- **Adjustable Priors:** Modify `UNIFORM_PRIOR` in `generate_graz_priors.py` (default: `0.6`) and run:
+  ```bash
+  python3 generate_graz_priors.py
+  ```
 
-### Start Simulation
-
- `python main.py -c brussels_rural_config.json -m simulate`
-
-### Start Analyze
-
- `python main.py -c brussels_rural_config.json -m analyze`
-
-
-## Research questions
-- the influence of road damage geometry on the detection of road damage and generation of the map (single lane road)
-- the influence of severity of road damage on the detection of road damage and generation of the map (low, medium, high)
-- the influence of the lane where the road damage is located on the detection of road damage and generation of the map (e.g. left lane, right lane, middle lane)
-
-- How many and percentage of vehicles and how many of the data are needed to detect road damage with a certain probability?
-
-## Graz A2 Scenario (New)
-
-### 1. Visualization
-Visualize the risk zones overlaid on the road network:
-`python visualize_risk_map.py`
-
-Output: `image/Graz_A2_risk_visualization.png`
-
-### 2. Batch Experiments
-Run simulations for multiple scenarios (Graz_A2, brussels_rural) in sequence:
-`python run_experiments.py`
-
-This script will:
-- Generate temporary configs with specified `SIM_STEPS`.
-- Run simulation and analysis for each scenario.
-- Save output images to `image/<scenario_name>/`.
-
-
-### 3. Manual Execution (Graz A2)
-**Simulate:**
-`python main.py --config config/Graz_A2_config.json --mode simulate`
-
-**Simulate with GUI:**
-`python main.py --config config/Graz_A2_config.json --mode simulate --gui`
-
-**Analyze:**
-`python main.py --config config/Graz_A2_config.json --mode analyze`
-*Note: Analysis loads risk priors from `data/Graz_A2/road_anomaly_probabilities.json`.*
+## 📊 Visualization
+Visualize the prior maps and risk zones:
+- **Clustered Map (Graz):** `python3 visualize_clustered_prior.py`
+- **Risk Map (Graz):** `python3 visualize_risk_map.py`
+- **Prior Map (Brussels):** `python3 visualize_prior_map.py`
