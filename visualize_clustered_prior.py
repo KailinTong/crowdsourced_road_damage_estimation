@@ -210,9 +210,9 @@ def visualize_clustered_map(prob_grid, type_grid, id_grid, output_path, x_min, x
     # Create legend
     legend_patches = [
         patches.Patch(color=COLORS['mild_road'], label='Road Network (p=0.05)'),
-        patches.Patch(color=COLORS['pothole_h'], label='High Severity (>50mm dev., p=0.6)'),
-        patches.Patch(color=COLORS['pothole_m'], label='Medium Severity (25-50mm dev., p=0.6)'),
-        patches.Patch(color=COLORS['pothole_l'], label='Low Severity (13-25mm dev., p=0.6)'),
+        patches.Patch(color=COLORS['pothole_h'], label='High Severity (p=0.6)'),
+        patches.Patch(color=COLORS['pothole_m'], label='Medium Severity (p=0.6)'),
+        patches.Patch(color=COLORS['pothole_l'], label='Low Severity (p=0.6)'),
     ]
     ax.legend(handles=legend_patches, loc='best', bbox_to_anchor=(1.02, 0.5),
               framealpha=0.9)
