@@ -65,11 +65,6 @@ You can evaluate the system's performance using standard ML and road engineering
     - **Average IoU:** Measures spatial accuracy of the predicted bounds.
     - **Severity Accuracy:** Measures the accuracy of Low/Medium/High severity classification.
 
-## 📈 Batch Experiments
-To run automated simulations, analysis, and evaluation for both scenarios in sequence:
-```bash
-python3 run_experiments.py
-```
 
 ## 📊 Visualization
 Visualize the prior maps and risk zones:
