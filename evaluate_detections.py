@@ -1,9 +1,10 @@
 import json
 import argparse
 from shapely.wkt import loads as load_wkt
-from shapely.geometry import shape, Polygon
+from shapely.geometry import shape, Polygon, MultiPolygon
 import numpy as np
 import os
+from utilities import compare_anomaly_results
 
 # Literature Reference for Evaluation Criteria:
 # Common road damage detection challenges (e.g., GRDDC) and literature on automated pavement distress 
@@ -33,7 +34,11 @@ def evaluate(gt_path, pred_path, iou_threshold=0.3):
 
     # Load GT
     with open(gt_path, 'r') as f:
-        gt_dict = json.load(f)
+        gt_raw = json.load(f)
+    if isinstance(gt_raw, dict):
+        gt_list = [{'id': k, **v} for k, v in gt_raw.items()]
+    else:
+        gt_list = gt_raw
     
     # Load Pred
     with open(pred_path, 'r') as f:
@@ -41,25 +46,28 @@ def evaluate(gt_path, pred_path, iou_threshold=0.3):
 
     # Convert GT to a list of dicts with shapely polygons
     gt_polys = []
-    for k, v in gt_dict.items():
-        sev = v['severity']
-        # Convert mild_road to a type if needed, but usually we only evaluate potholes
+    for item in gt_list:
+        sev = item.get('severity', 'unknown')
+        # Convert mild_road to a type if needed
         if sev == 'mild_road':
             continue
-        gt_type = f"pothole_{sev}"
+        gt_type = item.get('road_anomaly_type') or f"pothole_{sev}"
+        wkt = item.get('polygon') or item.get('shape')
+        if not wkt:
+            continue
         try:
-            poly = load_wkt(v['polygon'])
+            poly = load_wkt(wkt)
             if not poly.is_valid:
                 poly = poly.buffer(0)
             gt_polys.append({
-                'id': k, 
+                'id': item.get('id', 'unknown'), 
                 'type': gt_type, 
                 'severity': sev, 
                 'poly': poly,
                 'area': poly.area
             })
         except Exception as e:
-            print(f"Warning: Could not parse GT polygon for {k}: {e}")
+            print(f"Warning: Could not parse GT polygon: {e}")
 
     # Convert Pred to a list of dicts with shapely polygons
     pred_polys = []
@@ -171,36 +179,54 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate road damage detection results using common ML KPIs.")
     parser.add_argument("--gt", type=str, required=True, help="Path to ground truth JSON (road_anomaly_probabilities.json).")
     parser.add_argument("--pred", type=str, required=True, help="Path to prediction JSON (result_*.json).")
-    parser.add_argument("--iou", type=float, default=0.3, help="IoU threshold for matching (default: 0.3).")
-    parser.add_argument("--output", type=str, help="Optional path to save evaluation results as JSON.")
+    parser.add_argument("--iou", type=float, default=0.3, help="IoU threshold for matching (default: 0.3)")
+    parser.add_argument("--output", type=str, help="Path to save evaluation JSON results")
+    parser.add_argument("--net", type=str, help="Path to SUMO network file for background plotting")
+    parser.add_argument("--plot", type=str, help="Path to save the comparison plot (drawing)")
     
     args = parser.parse_args()
     
-    res = evaluate(args.gt, args.pred, args.iou)
+    results = evaluate(args.gt, args.pred, iou_threshold=args.iou)
     
-    if "error" in res:
-        print(f"Error: {res['error']}")
+    # Generate the "drawings" if requested
+    if args.plot:
+        print(f"  > Generating drawing: {args.plot}")
+        # Note: compare_anomaly_results also recalculates KPIs but its plotting is exactly what's requested
+        compare_anomaly_results(
+            gt_json_path=args.gt,
+            det_json_path=args.pred,
+            save_path=args.plot,
+            iou_threshold=args.iou, # Use same IoU for consistency
+            net_file=args.net
+        )
+    
+    # Save JSON results
+    if args.output:
+        if "error" in results:
+            print(f"Error: {results['error']}")
+        else:
+            with open(args.output, 'w') as f:
+                json.dump(results, f, indent=4)
+            print(f"Results saved to {args.output}")
+    
+    if "error" in results:
+        print(f"Error: {results['error']}")
     else:
         print("\n=== Road Damage Estimation Evaluation ===")
         print(f"GT File: {args.gt}")
         print(f"Pred File: {args.pred}")
         print("-" * 40)
-        print(f"Ground Truth Total: {res['counts']['ground_truth_total']}")
-        print(f"Predictions Total:  {res['counts']['predictions_total']}")
-        print(f"True Positives:     {res['counts']['true_positives']}")
-        print(f"False Positives:    {res['counts']['false_positives']}")
-        print(f"False Negatives:    {res['counts']['false_negatives']}")
+        print(f"Ground Truth Total: {results['counts']['ground_truth_total']}")
+        print(f"Predictions Total:  {results['counts']['predictions_total']}")
+        print(f"True Positives:     {results['counts']['true_positives']}")
+        print(f"False Positives:    {results['counts']['false_positives']}")
+        print(f"False Negatives:    {results['counts']['false_negatives']}")
         print("-" * 40)
-        print(f"Precision:          {res['metrics']['precision']}")
-        print(f"Recall:             {res['metrics']['recall']}")
-        print(f"F1-Score:           {res['metrics']['f1_score']}")
-        print(f"Average IoU:        {res['metrics']['average_iou']}")
-        print(f"Severity Accuracy:  {res['metrics']['severity_accuracy']}")
+        print(f"Precision:          {results['metrics']['precision']}")
+        print(f"Recall:             {results['metrics']['recall']}")
+        print(f"F1-Score:           {results['metrics']['f1_score']}")
+        print(f"Average IoU:        {results['metrics']['average_iou']}")
+        print(f"Severity Accuracy:  {results['metrics']['severity_accuracy']}")
         print("-" * 40)
-        print(f"Successful Detections: {res['successful_detections']}")
+        print(f"Successful Detections: {results['successful_detections']}")
         print("==========================================\n")
-        
-        if args.output:
-            with open(args.output, 'w') as f:
-                json.dump(res, f, indent=4)
-            print(f"Results saved to {args.output}")

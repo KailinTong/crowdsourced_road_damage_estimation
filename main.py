@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
-import matplotlib.pyplot as plt
-import sumolib
-import numpy as np
+import os
+import sys
 import json
+import argparse
+import numpy as np
+import traci
+import sumolib
+import matplotlib.pyplot as plt
+from pathlib import Path
+from typing import Dict, List
+
 from grid import OccupancyGrid
 from sensor import VehicleSensor, Detection
 from sumo_interface import SumoInterface
@@ -18,6 +25,9 @@ from pathlib import Path
 
 
 def simulate():
+    # Ensure data directory exists
+    os.makedirs('data/' + SCENARIO_NAME, exist_ok=True)
+    
     damage_model = RoadDamage(NET_FILE, DAMAGE_EDGE_IDS, radius=3.0, damage_file=ADDITIONAL_FILE, probability_file=PROBABILITY_FILE)
     # save the damage model according to the scenario name
     damage_model.save('data/' + SCENARIO_NAME + '/damage_model.json')
@@ -218,9 +228,13 @@ def analyze(detection_file_name):
 
     visualize_clustered_map(clustered_prob_map, filtered_prob_map_type, region_id_map, save_path="image/" + SCENARIO_NAME + '/clustered_probability_map_' + str(SIM_STEPS) + '.png',)
 
+    # Ensure image directory exists
+    os.makedirs('image/' + SCENARIO_NAME, exist_ok=True)
+    
     results = compare_anomaly_results(gt_json_path="data/" + SCENARIO_NAME + '/damage_model.json', det_json_path="data/" + SCENARIO_NAME + '/result_' + str(SIM_STEPS) + ".json",
-                                      save_path="image/" + SCENARIO_NAME + "/compare_" + str(SIM_STEPS) + ".png", containment_threshold=0.5)
-    print(results)
+                                      save_path="image/" + SCENARIO_NAME + "/compare_" + str(SIM_STEPS) + ".png", iou_threshold=0.3, net_file=NET_FILE)
+    print("\nVisual Comparison Results:")
+    print(json.dumps(results, indent=2))
 
 
 

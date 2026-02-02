@@ -70,16 +70,27 @@ def run_experiment(config_path, steps):
                     print(f"    Generated: {os.path.join(image_dir, filename)}")
         
         # 4. Evaluate
-        print(f"  > Evaluating...")
+        print(f"  > Evaluating and Generating Drawings...")
         gt_file = config_data.get("PROBABILITY_FILE")
+        net_file = config_data.get("NET_FILE")
         if gt_file and os.path.exists(gt_file):
             pred_file = f"data/{scenario_name}/result_{steps}.json"
             eval_output = f"data/{scenario_name}/evaluation_{steps}.json"
+            eval_plot = f"image/{scenario_name}/compare_{steps}.png"
             if os.path.exists(pred_file):
-                subprocess.run(
-                    [sys.executable, "evaluate_detections.py", "--gt", gt_file, "--pred", pred_file, "--output", eval_output],
-                    check=True
-                )
+                eval_args = [
+                    sys.executable, "evaluate_detections.py",
+                    "--gt", gt_file,
+                    "--pred", pred_file,
+                    "--output", eval_output,
+                    "--plot", eval_plot
+                ]
+                if net_file:
+                    eval_args.extend(["--net", net_file])
+                
+                subprocess.run(eval_args, check=True, env=env)
+                print(f"    Generated evaluation: {eval_output}")
+                print(f"    Generated drawing: {eval_plot}")
             else:
                 print(f"    ! Prediction file not found: {pred_file}")
         else:

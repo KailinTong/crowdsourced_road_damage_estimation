@@ -1,7 +1,12 @@
 from typing import Dict, List
 import json
+import os
 from shapely.wkt import loads as load_wkt
-from shapely.geometry import shape
+from shapely.geometry import shape, Polygon, MultiPolygon
+import xml.etree.ElementTree as ET
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg') # Ensure non-interactive backend
 
 # laod the probability dictionary from the json file
 def load_road_anomaly_metrics(path: str = "data/road_anomaly_metrics.json") -> Dict[str, Dict[str, float]]:
@@ -25,6 +30,9 @@ def load_road_anomaly_metrics(path: str = "data/road_anomaly_metrics.json") -> D
         raise ValueError(f"Error parsing JSON metrics file: {e}")
 
     return data
+
+
+    return regions
 
 
 def load_insar_risk_regions(geojson_path: str, risk_property: str = "risk_level") -> List[dict]:
@@ -61,6 +69,34 @@ def load_insar_risk_regions(geojson_path: str, risk_property: str = "risk_level"
         })
 
     return regions
+
+
+def parse_lanes(net_file: str) -> List[List[tuple]]:
+    """
+    Extract network bounds and lane shapes from a SUMO net file.
+    Reused from scenario-specific visualization scripts.
+    """
+    try:
+        tree = ET.parse(net_file)
+        root = tree.getroot()
+        lanes = []
+        for edge in root.findall("edge"):
+            if edge.attrib.get("function") == "internal":
+                continue
+            for lane in edge.findall("lane"):
+                shape_str = lane.attrib.get("shape", "")
+                if not shape_str:
+                    continue
+                pts = []
+                for pair in shape_str.strip().split():
+                    coords = list(map(float, pair.split(",")))
+                    pts.append((coords[0], coords[1]))
+                lanes.append(pts)
+        return lanes
+    except Exception as e:
+        print(f"Warning: Could not parse lanes from {net_file}: {e}")
+        return []
+
 
 def gen_damage_area(damage_list, X_MIN, X_MAX, Y_MIN, Y_MAX, RESOLUTION, plot_margin=20):
 
@@ -231,61 +267,85 @@ def visualize_clustered_map(
 
 
 
-def compare_anomaly_results(gt_json_path: str, det_json_path: str, save_path: str, containment_threshold: float)-> dict:
+def compare_anomaly_results(gt_json_path: str, det_json_path: str, save_path: str, iou_threshold: float = 0.3, net_file: str = None)-> dict:
     """
-    Compare detected road anomalies against ground truth using containment/overlap.
-    Also plots both sets for visual inspection.
+    Compare detected road anomalies against ground truth using IoU (Intersection over Union).
+    Also plots both sets for visual inspection, optionally overlaid on the road network.
 
     Matching rule:
-        A detection matches a GT if they share the same anomaly type AND
-        (GT area in detection / GT area) >= containment_threshold.
+        A detection matches a GT if IoU >= iou_threshold.
 
     Args:
-        gt_json_path (str): Ground truth JSON.
-        det_json_path (str): Detection result JSON.
-        containment_threshold (float): Min fraction of GT covered by detection.
+        gt_json_path (str): Ground truth JSON (can be damage_model.json or probabilities.json).
+        det_json_path (str): Detection result JSON (result_*.json).
+        save_path (str): Path to save the comparison plot.
+        iou_threshold (float): Minimum IoU for a match.
+        net_file (str): Optional path to SUMO network file for background.
 
     Returns:
         dict: KPIs and match list.
     """
     import matplotlib.pyplot as plt
     # Load JSON files
-    with open(gt_json_path, "r") as f:
-        gt_data = json.load(f)
-    with open(det_json_path, "r") as f:
+    with open(gt_json_path, 'r') as f:
+        gt_raw = json.load(f)
+    
+    # Handle dict vs list for GT
+    if isinstance(gt_raw, dict):
+        gt_data = list(gt_raw.values())
+    else:
+        gt_data = gt_raw
+        
+    with open(det_json_path, 'r') as f:
         det_data = json.load(f)
 
-    # Parse polygons
-    gt_polys = [(g["road_anomaly_type"], g["severity"], load_wkt(g["shape"])) for g in gt_data]
-    det_polys = [(d["road_anomaly_type"], d["severity"], load_wkt(d["shape"])) for d in det_data]
+    # Conversion logic with key mapping
+    gt_polys = []
+    for g in gt_data:
+        # Try different shape keys
+        wkt = g.get("shape") or g.get("polygon")
+        if not wkt: continue
+        
+        # Try different type/severity keys
+        type_str = g.get("road_anomaly_type") or "pothole"
+        sev_str = g.get("severity") or "unknown"
+        gt_polys.append((type_str, sev_str, load_wkt(wkt)))
+
+    det_polys = []
+    for d in det_data:
+        wkt = d.get("shape") or d.get("polygon")
+        if not wkt: continue
+        type_str = d.get("road_anomaly_type") or "pothole"
+        sev_str = d.get("severity") or "unknown"
+        det_polys.append((type_str, sev_str, load_wkt(wkt)))
 
     matches = []
     used_gt = set()
     used_det = set()
 
-    # Matching: same type + containment/overlap
+    # Matching: IoU-based greedy matching
     for det_idx, (det_type, det_sev, det_poly) in enumerate(det_polys):
-        best_cover = 0
+        best_iou = 0
         best_gt_idx = None
         for gt_idx, (gt_type, gt_sev, gt_poly) in enumerate(gt_polys):
             if gt_idx in used_gt:
-                continue
-            if gt_type != det_type:
                 continue
             if not det_poly.is_valid or not gt_poly.is_valid:
                 continue
 
             if det_poly.intersects(gt_poly):
-                cover_ratio = det_poly.intersection(gt_poly).area / gt_poly.area
-                if cover_ratio > best_cover:
-                    best_cover = cover_ratio
+                intersection = det_poly.intersection(gt_poly).area
+                union = det_poly.union(gt_poly).area
+                iou = intersection / union if union > 0 else 0
+                if iou > best_iou:
+                    best_iou = iou
                     best_gt_idx = gt_idx
 
-        if best_gt_idx is not None and best_cover >= containment_threshold:
+        if best_gt_idx is not None and best_iou >= iou_threshold:
             matches.append({
                 "det_idx": det_idx,
                 "gt_idx": best_gt_idx,
-                "cover_ratio": best_cover,
+                "iou": best_iou,
                 "severity": det_sev
             })
             used_gt.add(best_gt_idx)
@@ -298,7 +358,7 @@ def compare_anomaly_results(gt_json_path: str, det_json_path: str, save_path: st
     precision = TP / (TP + FP) if TP + FP > 0 else 0
     recall = TP / (TP + FN) if TP + FN > 0 else 0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
-    mean_cover = sum(m["cover_ratio"] for m in matches) / TP if TP > 0 else 0
+    avg_iou = sum(m["iou"] for m in matches) / TP if TP > 0 else 0
 
     results = {
         "overall": {
@@ -308,7 +368,7 @@ def compare_anomaly_results(gt_json_path: str, det_json_path: str, save_path: st
             "precision": precision,
             "recall": recall,
             "f1_score": f1,
-            "mean_cover_ratio": mean_cover
+            "avg_iou": avg_iou
         },
         "matches": matches,
         "per_severity": {}
@@ -325,7 +385,7 @@ def compare_anomaly_results(gt_json_path: str, det_json_path: str, save_path: st
         prec_s = TP_s / (TP_s + FP_s) if TP_s + FP_s > 0 else 0
         rec_s = TP_s / (TP_s + FN_s) if TP_s + FN_s > 0 else 0
         f1_s = 2 * prec_s * rec_s / (prec_s + rec_s) if (prec_s + rec_s) > 0 else 0
-        mean_cover_s = (sum(m["cover_ratio"] for m in matches if m["severity"] == sev) / TP_s) if TP_s > 0 else 0
+        avg_iou_s = (sum(m["iou"] for m in matches if m["severity"] == sev) / TP_s) if TP_s > 0 else 0
 
         results["per_severity"][sev] = {
             "true_positives": TP_s,
@@ -334,24 +394,51 @@ def compare_anomaly_results(gt_json_path: str, det_json_path: str, save_path: st
             "precision": prec_s,
             "recall": rec_s,
             "f1_score": f1_s,
-            "mean_cover_ratio": mean_cover_s
+            "avg_iou": avg_iou_s
         }
 
     # Plot for visual verification
-    fig, ax = plt.subplots(figsize=(8, 8))
+    fig, ax = plt.subplots(figsize=(12, 10))
+
+    # 1. Plot Network Lanes first
+    if net_file and os.path.exists(net_file):
+        lanes = parse_lanes(net_file)
+        for pts in lanes:
+            xs, ys = zip(*pts)
+            ax.plot(xs, ys, color='gray', linewidth=0.5, alpha=0.3, zorder=0)
+
+    # 2. Plot GT Polygons
     for _, _, poly in gt_polys:
-        x, y = poly.exterior.xy
-        ax.plot(x, y, color="blue", label="Ground Truth" if "Ground Truth" not in ax.get_legend_handles_labels()[1] else "")
+        if poly.geom_type == 'Polygon':
+            x, y = poly.exterior.xy
+            ax.fill(x, y, color="blue", alpha=0.3, label="Ground Truth" if "Ground Truth" not in ax.get_legend_handles_labels()[1] else "", zorder=1)
+            ax.plot(x, y, color="blue", linewidth=1, zorder=2)
+        elif poly.geom_type == 'MultiPolygon':
+            for sp in poly.geoms:
+                x, y = sp.exterior.xy
+                ax.fill(x, y, color="blue", alpha=0.3, zorder=1)
+                ax.plot(x, y, color="blue", linewidth=1, zorder=2)
+
+    # 3. Plot Detection Polygons
     for _, _, poly in det_polys:
-        x, y = poly.exterior.xy
-        ax.plot(x, y, color="red", linestyle="--", label="Detection" if "Detection" not in ax.get_legend_handles_labels()[1] else "")
+        if poly.geom_type == 'Polygon':
+            x, y = poly.exterior.xy
+            ax.plot(x, y, color="red", linestyle="--", linewidth=1.5, label="Detection" if "Detection" not in ax.get_legend_handles_labels()[1] else "", zorder=3)
+        elif poly.geom_type == 'MultiPolygon':
+            for sp in poly.geoms:
+                x, y = sp.exterior.xy
+                ax.plot(x, y, color="red", linestyle="--", linewidth=1.5, zorder=3)
+
     ax.set_aspect("equal", adjustable="box")
-    ax.legend()
-    ax.set_title("Ground Truth (blue) vs Detection (red)")
-    # save the image in the same folder
-    plt.savefig(save_path)
-    plt.show()
-    plt.close()
+    ax.legend(loc='upper right')
+    ax.set_title(f"Road Damage Comparison: GT (blue) vs Detection (red)\nMetrics: Precision={precision:.2f}, Recall={recall:.2f}, F1={f1:.2f}")
+    
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    plt.close(fig)
 
     return results
 
