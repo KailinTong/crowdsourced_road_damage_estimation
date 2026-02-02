@@ -35,12 +35,22 @@ def run_experiment(config_path, steps):
     with open(temp_config_path, 'w') as f:
         json.dump(config_data, f, indent=4)
         
+    # Set up environment with SUMO tools
+    env = os.environ.copy()
+    sumo_home = env.get("SUMO_HOME", "/usr/share/sumo")
+    sumo_tools = os.path.join(sumo_home, "tools")
+    if "PYTHONPATH" in env:
+        env["PYTHONPATH"] += os.pathsep + sumo_tools
+    else:
+        env["PYTHONPATH"] = sumo_tools
+
     try:
         # 1. Simulate
         print(f"  > Simulating...")
         subprocess.run(
             [sys.executable, "main.py", "--config", temp_config_path, "--mode", "simulate"],
-            check=True
+            check=True,
+            env=env
         )
         
         # 2. Analyze
@@ -48,7 +58,8 @@ def run_experiment(config_path, steps):
         # Since main.py writes to detection_logs_<STEPS>.txt, it should handle the different step counts automatically
         subprocess.run(
             [sys.executable, "main.py", "--config", temp_config_path, "--mode", "analyze"],
-            check=True
+            check=True,
+            env=env
         )
         
         # 3. Rename/Move Images (Optional if main.py handles it, but let's ensure uniqueness)
@@ -56,10 +67,23 @@ def run_experiment(config_path, steps):
         if os.path.exists(image_dir):
             for filename in os.listdir(image_dir):
                 if filename.endswith(".png"):
-                    # Only rename if it doesn't already have the step count (main.py adds it, but let's be safe)
-                    # Current output: occupancy_grid_<type><STEPS>.png
-                    # We leave it as is, or we can move it to a central 'results' folder
                     print(f"    Generated: {os.path.join(image_dir, filename)}")
+        
+        # 4. Evaluate
+        print(f"  > Evaluating...")
+        gt_file = config_data.get("PROBABILITY_FILE")
+        if gt_file and os.path.exists(gt_file):
+            pred_file = f"data/{scenario_name}/result_{steps}.json"
+            eval_output = f"data/{scenario_name}/evaluation_{steps}.json"
+            if os.path.exists(pred_file):
+                subprocess.run(
+                    [sys.executable, "evaluate_detections.py", "--gt", gt_file, "--pred", pred_file, "--output", eval_output],
+                    check=True
+                )
+            else:
+                print(f"    ! Prediction file not found: {pred_file}")
+        else:
+            print(f"    ! Ground truth file not found: {gt_file}")
                     
     except subprocess.CalledProcessError as e:
         print(f"  ! Error during experiment: {e}")

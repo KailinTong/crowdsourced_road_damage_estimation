@@ -53,8 +53,27 @@ The Graz A2 scenario features a specialized pipeline connecting satellite measur
   python3 generate_graz_priors.py
   ```
 
+## 📊 Evaluation & KPIs
+You can evaluate the system's performance using standard ML and road engineering KPIs:
+- **Run Evaluation:**
+  ```bash
+  python3 evaluate_detections.py --gt data/Graz_A2/road_anomaly_probabilities.json --pred data/Graz_A2/result_30.json
+  ```
+- **KPIs include:**
+    - **TP / FP / FN:** Based on an **IoU threshold of 0.3** (common for irregular road anomalies).
+    - **Precision, Recall, F1:** Standard ML detection metrics.
+    - **Average IoU:** Measures spatial accuracy of the predicted bounds.
+    - **Severity Accuracy:** Measures the accuracy of Low/Medium/High severity classification.
+
+## 📈 Batch Experiments
+To run automated simulations, analysis, and evaluation for both scenarios in sequence:
+```bash
+python3 run_experiments.py
+```
+
 ## 📊 Visualization
 Visualize the prior maps and risk zones:
 - **Clustered Map (Graz):** `python3 visualize_clustered_prior.py`
 - **Risk Map (Graz):** `python3 visualize_risk_map.py`
 - **Prior Map (Brussels):** `python3 visualize_prior_map.py`
+- **Matches Plot:** Generates `image/<SCENARIO>/compare_<STEPS>.png` during evaluation.
