@@ -209,7 +209,7 @@ def visualize_clustered_map(prob_grid, type_grid, id_grid, output_path, x_min, x
     
     # Create legend
     legend_patches = [
-        patches.Patch(color=COLORS['mild_road'], label='Road Network (p=0.05)'),
+        patches.Patch(color=COLORS['mild_road'], label='Mild Road (p=0.05)'),
         patches.Patch(color=COLORS['pothole_h'], label='High Severity (p=0.6)'),
         patches.Patch(color=COLORS['pothole_m'], label='Medium Severity (p=0.6)'),
         patches.Patch(color=COLORS['pothole_l'], label='Low Severity (p=0.6)'),
