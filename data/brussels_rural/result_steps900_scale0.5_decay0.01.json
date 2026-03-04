@@ -1,0 +1,13 @@
+[
+    {
+        "id": "pothole_2",
+        "centroid": [
+            76.5,
+            41.42
+        ],
+        "probability": 0.705,
+        "severity": "h",
+        "road_anomaly_type": "pothole_h",
+        "shape": "POLYGON ((76.500000 41.420000, 76.510000 41.420000, 76.500000 41.430000, 76.500000 41.420000))"
+    }
+]

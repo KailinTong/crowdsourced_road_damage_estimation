@@ -1,0 +1,102 @@
+{
+    "mild_road": {
+        "tp": 0.95,
+        "fn": 0.05,
+        "fp": 0.066
+    },
+    "pothole_l": {
+        "tp": 0.9,
+        "fn": 0.1,
+        "fp": 0.166
+    },
+    "pothole_m": {
+        "tp": 0.875,
+        "fn": 0.125,
+        "fp": 0.093
+    },
+    "pothole_h": {
+        "tp": 0.85,
+        "fn": 0.15,
+        "fp": 0.02
+    },
+    "manhole_l": {
+        "tp": 0.9,
+        "fn": 0.1,
+        "fp": 0.1
+    },
+    "manhole_m": {
+        "tp": 0.91,
+        "fn": 0.09,
+        "fp": 0.09
+    },
+    "manhole_h": {
+        "tp": 0.92,
+        "fn": 0.08,
+        "fp": 0.08
+    },
+    "crack_l": {
+        "tp": 0.95,
+        "fn": 0.05,
+        "fp": 0.0125
+    },
+    "crack_m": {
+        "tp": 0.94,
+        "fn": 0.06,
+        "fp": 0.1
+    },
+    "crack_h": {
+        "tp": 0.9,
+        "fn": 0.1,
+        "fp": 0.15
+    },
+    "road_dent_l": {
+        "tp": 0.9,
+        "fn": 0.1,
+        "fp": 0.15
+    },
+    "road_dent_m": {
+        "tp": 0.9,
+        "fn": 0.1,
+        "fp": 0.125
+    },
+    "road_dent_h": {
+        "tp": 0.9,
+        "fn": 0.1,
+        "fp": 0.1
+    },
+    "railway_crossing_l": {
+        "tp": 0.85,
+        "fn": 0.15,
+        "fp": 0.05
+    },
+    "railway_crossing_m": {
+        "tp": 0.875,
+        "fn": 0.125,
+        "fp": 0.075
+    },
+    "railway_crossing_h": {
+        "tp": 0.9,
+        "fn": 0.1,
+        "fp": 0.1
+    },
+    "deceleration_strip": {
+        "tp": 0.8,
+        "fn": 0.2,
+        "fp": 0.4
+    },
+    "speed_bump": {
+        "tp": 0.9,
+        "fn": 0.1,
+        "fp": 0.0
+    },
+    "paved_stone_road": {
+        "tp": 0.94,
+        "fn": 0.06,
+        "fp": 0.02
+    },
+    "average": {
+        "tp": 0.9,
+        "fn": 0.1,
+        "fp": 0.097
+    }
+}

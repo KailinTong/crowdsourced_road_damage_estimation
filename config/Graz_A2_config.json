@@ -1,0 +1,22 @@
+{
+    "BATCH_SIZE": 360,
+    "RESOLUTION": 1.0,
+    "PRIOR_MILD": 0.05,
+    "MARGIN": 5.0,
+    "OVERLAP_STEPS": 20,
+    "GPS_SIGMA": 5.0,
+    "DECAY_RATE": 0.05,
+    "SMOOTHING_SIGMA": 1.0,
+    "SIM_STEPS": 30,
+    "SPEED_THRESHOLD": 5,
+    "PROB_THRESHOLD": 0.5,
+    "NEIGHBOR_DEPTH": 5,
+    "SCENARIO_NAME": "Graz_A2",
+    "NET_FILE": "scenario/Graz_A2/A2_GO2GW_v2_MM.net.xml",
+    "SUMOCFG_FILE": "scenario/Graz_A2/osm.sumocfg",
+    "ROUTE_FILE": "scenario/Graz_A2/A2Graz.rou.xml",
+    "ADDITIONAL_FILE": "data/Graz_A2/risk_zones.add.xml",
+    "PROBABILITY_FILE": "data/Graz_A2/road_anomaly_probabilities.json",
+    "ROAD_ANOMALY_DETECTION_FILE": "data/road_anomaly_metrics.json",
+    "DAMAGE_EDGE_IDS": []
+}
